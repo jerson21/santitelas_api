@@ -1,4 +1,4 @@
-// src/models/index.ts
+// src/models/index.ts - ASOCIACIONES LIMPIAS SIN DUPLICADOS
 import { sequelize } from '../config/database';
 
 // Importar modelos completos
@@ -6,8 +6,9 @@ import { Rol } from './Rol.model';
 import { Usuario } from './Usuario.model';
 import { Categoria } from './Categoria.model';
 import { Producto } from './Producto.model';
-import { ModalidadProducto } from './ModalidadProducto.model';  // NUEVO
-import { Cliente } from './Cliente.model';                      // NUEVO
+import { VarianteProducto } from './VarianteProducto.model';
+import { ModalidadProducto } from './ModalidadProducto.model';
+import { Cliente } from './Cliente.model';
 import { TipoDocumento } from './TipoDocumento.model';
 import { Bodega } from './Bodega.model';
 import { StockPorBodega } from './StockPorBodega.model';
@@ -15,66 +16,34 @@ import { Pedido } from './Pedido.model';
 import { DetallePedido } from './DetallePedido.model';
 import { MetodoPago } from './MetodoPago.model';
 import { Caja } from './Caja.model';
-import { VarianteProducto } from './VarianteProducto.model';
-
-
 import { TurnoCaja } from './TurnoCaja.model';
 import { ArqueoCaja } from './ArqueoCaja.model';
-
 import { Venta } from './Venta.model';
 import { Pago } from './Pago.model';
 import { MovimientoStock } from './MovimientoStock.model';
 
 // Exportar modelos
 export {
-  Rol,
-  Usuario,
-  Categoria,
-  Producto,
-  VarianteProducto,
-  ModalidadProducto,  // NUEVO
-  Cliente,            // NUEVO
-  TipoDocumento,
-  Bodega,
-  StockPorBodega,
-  Pedido,
-  DetallePedido,
-  MetodoPago,
-  Caja,
-  TurnoCaja,
-  ArqueoCaja,
-  Venta,
-  Pago,
-  MovimientoStock
+  Rol, Usuario, Categoria, Producto, VarianteProducto, ModalidadProducto,
+  Cliente, TipoDocumento, Bodega, StockPorBodega, Pedido, DetallePedido,
+  MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock
 };
 
-// Función para inicializar modelos
 export async function initializeModels() {
   try {
-    // Agregar modelos a Sequelize
+    // Primero registrar todos los modelos
     sequelize.addModels([
-      Rol,
-      Usuario,
-      Categoria,
-      Producto,
-      VarianteProducto,
-      ModalidadProducto,
-      Cliente,
-      TipoDocumento,
-      Bodega,
-      StockPorBodega,
-      Pedido,
-      DetallePedido,
-      MetodoPago,
-      Caja,
-      TurnoCaja,
-      ArqueoCaja,
-      Venta,
-      Pago,
-      MovimientoStock
+      Rol, Usuario, Categoria, Producto, VarianteProducto, ModalidadProducto,
+      Cliente, TipoDocumento, Bodega, StockPorBodega, Pedido, DetallePedido,
+      MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock
     ]);
 
     console.log('📊 Modelos registrados:', Object.keys(sequelize.models).join(', '));
+    
+    // Luego configurar las asociaciones
+    setupAssociations();
+    console.log('🔗 Asociaciones configuradas correctamente');
+    
     return true;
   } catch (error) {
     console.error('❌ Error inicializando modelos:', error);
@@ -82,191 +51,115 @@ export async function initializeModels() {
   }
 }
 
-// Función para establecer asociaciones completas
+// ✅ ASOCIACIONES LIMPIAS - SIN DUPLICADOS
 export function setupAssociations() {
   try {
+    console.log('🔗 Configurando asociaciones sin duplicados...');
+
+    // Verificar que todos los modelos existen antes de crear asociaciones
+    const models = sequelize.models;
+    const requiredModels = [
+      'Rol', 'Usuario', 'Categoria', 'Producto', 'VarianteProducto', 
+      'ModalidadProducto', 'Cliente', 'TipoDocumento', 'Bodega', 
+      'StockPorBodega', 'Pedido', 'DetallePedido', 'MetodoPago', 
+      'Caja', 'TurnoCaja', 'ArqueoCaja', 'Venta', 'Pago', 'MovimientoStock'
+    ];
+
+    for (const modelName of requiredModels) {
+      if (!models[modelName]) {
+        throw new Error(`Modelo ${modelName} no encontrado en sequelize.models`);
+      }
+    }
+
     // === USUARIOS Y ROLES ===
-    Usuario.belongsTo(Rol, { 
-      foreignKey: 'id_rol', 
-      as: 'rol' 
-    });
-    Rol.hasMany(Usuario, { 
-      foreignKey: 'id_rol', 
-      as: 'usuarios' 
-    });
+    Usuario.belongsTo(Rol, { foreignKey: 'id_rol', as: 'rol' });
+    Rol.hasMany(Usuario, { foreignKey: 'id_rol', as: 'usuarios' });
 
     // === PRODUCTOS Y CATEGORÍAS ===
-    Producto.belongsTo(Categoria, { 
-      foreignKey: 'id_categoria', 
-      as: 'categoria' 
-    });
-    Categoria.hasMany(Producto, { 
-      foreignKey: 'id_categoria', 
-      as: 'productos' 
-    });
+    Producto.belongsTo(Categoria, { foreignKey: 'id_categoria', as: 'categoria' });
+    Categoria.hasMany(Producto, { foreignKey: 'id_categoria', as: 'productos' });
 
-    // === STOCK POR BODEGA ===
-    StockPorBodega.belongsTo(Producto, { 
-      foreignKey: 'id_producto', 
-      as: 'producto' 
-    });
-    StockPorBodega.belongsTo(Bodega, { 
-      foreignKey: 'id_bodega', 
-      as: 'bodega' 
-    });
-    Producto.hasMany(StockPorBodega, { 
-      foreignKey: 'id_producto', 
-      as: 'stockPorBodega' 
-    });
-    Bodega.hasMany(StockPorBodega, { 
-      foreignKey: 'id_bodega', 
-      as: 'stock' 
-    });
+    // === VARIANTES DE PRODUCTOS ===
+    VarianteProducto.belongsTo(Producto, { foreignKey: 'id_producto', as: 'producto' });
+    Producto.hasMany(VarianteProducto, { foreignKey: 'id_producto', as: 'variantes' });
 
-    // === PEDIDOS ===
-    Pedido.belongsTo(Usuario, { 
-      foreignKey: 'id_vendedor', 
-      as: 'vendedor' 
-    });
-    Usuario.hasMany(Pedido, { 
-      foreignKey: 'id_vendedor', 
-      as: 'pedidos' 
-    });
+    // === MODALIDADES A NIVEL DE PRODUCTO ===
+    ModalidadProducto.belongsTo(Producto, { foreignKey: 'id_producto', as: 'producto' });
+    Producto.hasMany(ModalidadProducto, { foreignKey: 'id_producto', as: 'modalidades' });
+
+    // === STOCK POR BODEGA (CON VARIANTES) ===
+    StockPorBodega.belongsTo(VarianteProducto, { foreignKey: 'id_variante_producto', as: 'varianteProducto' });
+    StockPorBodega.belongsTo(Bodega, { foreignKey: 'id_bodega', as: 'bodega' });
+    VarianteProducto.hasMany(StockPorBodega, { foreignKey: 'id_variante_producto', as: 'stockPorBodega' });
+    Bodega.hasMany(StockPorBodega, { foreignKey: 'id_bodega', as: 'stock' });
+
+    // === CLIENTES Y PEDIDOS ===
+    Cliente.hasMany(Pedido, { foreignKey: 'id_cliente', as: 'pedidos' });
+    Pedido.belongsTo(Cliente, { foreignKey: 'id_cliente', as: 'cliente' });
+
+    // === USUARIOS VENDEDORES Y PEDIDOS ===
+    Usuario.hasMany(Pedido, { foreignKey: 'id_vendedor', as: 'pedidosVendedor' });
+    Pedido.belongsTo(Usuario, { foreignKey: 'id_vendedor', as: 'vendedor' });
 
     // === DETALLE PEDIDOS ===
-    DetallePedido.belongsTo(Pedido, { 
-      foreignKey: 'id_pedido', 
-      as: 'pedido' 
-    });
-    DetallePedido.belongsTo(Producto, { 
-      foreignKey: 'id_producto', 
-      as: 'producto' 
-    });
-    Pedido.hasMany(DetallePedido, { 
-      foreignKey: 'id_pedido', 
-      as: 'detalles',
-      onDelete: 'CASCADE' 
-    });
-    Producto.hasMany(DetallePedido, { 
-      foreignKey: 'id_producto', 
-      as: 'detallesPedidos' 
-    });
+    Pedido.hasMany(DetallePedido, { foreignKey: 'id_pedido', as: 'detalles', onDelete: 'CASCADE' });
+    DetallePedido.belongsTo(Pedido, { foreignKey: 'id_pedido', as: 'pedido' });
+    
+    VarianteProducto.hasMany(DetallePedido, { foreignKey: 'id_variante_producto', as: 'detallesPedidos' });
+    DetallePedido.belongsTo(VarianteProducto, { foreignKey: 'id_variante_producto', as: 'varianteProducto' });
+    
+    ModalidadProducto.hasMany(DetallePedido, { foreignKey: 'id_modalidad', as: 'detallesPedidos' });
+    DetallePedido.belongsTo(ModalidadProducto, { foreignKey: 'id_modalidad', as: 'modalidad' });
+
+    // === AUTORIZACIONES DE PRECIO ===
+    Usuario.hasMany(DetallePedido, { foreignKey: 'precio_autorizado_por', as: 'autorizacionesPrecios' });
+    DetallePedido.belongsTo(Usuario, { foreignKey: 'precio_autorizado_por', as: 'usuarioAutorizador' });
 
     // === CAJAS Y TURNOS ===
-    Caja.hasMany(TurnoCaja, { 
-      foreignKey: 'id_caja', 
-      as: 'turnos' 
-    });
-    TurnoCaja.belongsTo(Caja, { 
-      foreignKey: 'id_caja', 
-      as: 'caja' 
-    });
-
-    TurnoCaja.belongsTo(Usuario, { 
-      foreignKey: 'id_cajero', 
-      as: 'cajero' 
-    });
-    Usuario.hasMany(TurnoCaja, { 
-      foreignKey: 'id_cajero', 
-      as: 'turnos' 
-    });
+    Caja.hasMany(TurnoCaja, { foreignKey: 'id_caja', as: 'turnos' });
+    TurnoCaja.belongsTo(Caja, { foreignKey: 'id_caja', as: 'caja' });
+    
+    Usuario.hasMany(TurnoCaja, { foreignKey: 'id_cajero', as: 'turnosCajero' });
+    TurnoCaja.belongsTo(Usuario, { foreignKey: 'id_cajero', as: 'cajero' });
 
     // === ARQUEOS ===
-    ArqueoCaja.belongsTo(TurnoCaja, { 
-      foreignKey: 'id_turno', 
-      as: 'turno' 
-    });
-    TurnoCaja.hasOne(ArqueoCaja, { 
-      foreignKey: 'id_turno', 
-      as: 'arqueo' 
-    });
+    TurnoCaja.hasOne(ArqueoCaja, { foreignKey: 'id_turno', as: 'arqueo' });
+    ArqueoCaja.belongsTo(TurnoCaja, { foreignKey: 'id_turno', as: 'turno' });
 
     // === VENTAS ===
-    Venta.belongsTo(Pedido, { 
-      foreignKey: 'id_pedido', 
-      as: 'pedido' 
-    });
-    Venta.belongsTo(TurnoCaja, { 
-      foreignKey: 'id_turno', 
-      as: 'turno' 
-    });
-    Venta.belongsTo(TipoDocumento, { 
-      foreignKey: 'id_tipo_documento', 
-      as: 'tipoDocumento' 
-    });
-    Venta.belongsTo(Bodega, { 
-      foreignKey: 'id_bodega', 
-      as: 'bodega' 
-    });
+    Pedido.hasOne(Venta, { foreignKey: 'id_pedido', as: 'venta' });
+    Venta.belongsTo(Pedido, { foreignKey: 'id_pedido', as: 'pedido' });
     
-    Pedido.hasOne(Venta, { 
-      foreignKey: 'id_pedido', 
-      as: 'venta' 
-    });
-    TurnoCaja.hasMany(Venta, { 
-      foreignKey: 'id_turno', 
-      as: 'ventas' 
-    });
-    TipoDocumento.hasMany(Venta, { 
-      foreignKey: 'id_tipo_documento', 
-      as: 'ventas' 
-    });
-    Bodega.hasMany(Venta, { 
-      foreignKey: 'id_bodega', 
-      as: 'ventas' 
-    });
+    TurnoCaja.hasMany(Venta, { foreignKey: 'id_turno', as: 'ventas' });
+    Venta.belongsTo(TurnoCaja, { foreignKey: 'id_turno', as: 'turno' });
+    
+    TipoDocumento.hasMany(Venta, { foreignKey: 'id_tipo_documento', as: 'ventas' });
+    Venta.belongsTo(TipoDocumento, { foreignKey: 'id_tipo_documento', as: 'tipoDocumento' });
+    
+    Bodega.hasMany(Venta, { foreignKey: 'id_bodega', as: 'ventasBodega' });
+    Venta.belongsTo(Bodega, { foreignKey: 'id_bodega', as: 'bodega' });
 
     // === PAGOS ===
-    Pago.belongsTo(Venta, { 
-      foreignKey: 'id_venta', 
-      as: 'venta' 
-    });
-    Pago.belongsTo(MetodoPago, { 
-      foreignKey: 'id_metodo_pago', 
-      as: 'metodoPago' 
-    });
-    Venta.hasMany(Pago, { 
-      foreignKey: 'id_venta', 
-      as: 'pagos',
-      onDelete: 'CASCADE' 
-    });
-    MetodoPago.hasMany(Pago, { 
-      foreignKey: 'id_metodo_pago', 
-      as: 'pagos' 
-    });
+    Venta.hasMany(Pago, { foreignKey: 'id_venta', as: 'pagos', onDelete: 'CASCADE' });
+    Pago.belongsTo(Venta, { foreignKey: 'id_venta', as: 'venta' });
+    
+    MetodoPago.hasMany(Pago, { foreignKey: 'id_metodo_pago', as: 'pagos' });
+    Pago.belongsTo(MetodoPago, { foreignKey: 'id_metodo_pago', as: 'metodoPago' });
 
     // === MOVIMIENTOS DE STOCK ===
-    MovimientoStock.belongsTo(Producto, { 
-      foreignKey: 'id_producto', 
-      as: 'producto' 
-    });
-    MovimientoStock.belongsTo(Bodega, { 
-      foreignKey: 'id_bodega', 
-      as: 'bodega' 
-    });
-    MovimientoStock.belongsTo(Bodega, { 
-      foreignKey: 'id_bodega_destino', 
-      as: 'bodegaDestino' 
-    });
-    MovimientoStock.belongsTo(Usuario, { 
-      foreignKey: 'id_usuario', 
-      as: 'usuario' 
-    });
+    VarianteProducto.hasMany(MovimientoStock, { foreignKey: 'id_variante_producto', as: 'movimientos' });
+    MovimientoStock.belongsTo(VarianteProducto, { foreignKey: 'id_variante_producto', as: 'varianteProducto' });
     
-    Producto.hasMany(MovimientoStock, { 
-      foreignKey: 'id_producto', 
-      as: 'movimientos' 
-    });
-    Bodega.hasMany(MovimientoStock, { 
-      foreignKey: 'id_bodega', 
-      as: 'movimientos' 
-    });
-    Usuario.hasMany(MovimientoStock, { 
-      foreignKey: 'id_usuario', 
-      as: 'movimientosStock' 
-    });
+    Bodega.hasMany(MovimientoStock, { foreignKey: 'id_bodega', as: 'movimientosOrigen' });
+    MovimientoStock.belongsTo(Bodega, { foreignKey: 'id_bodega', as: 'bodega' });
+    
+    Bodega.hasMany(MovimientoStock, { foreignKey: 'id_bodega_destino', as: 'movimientosDestino' });
+    MovimientoStock.belongsTo(Bodega, { foreignKey: 'id_bodega_destino', as: 'bodegaDestino' });
+    
+    Usuario.hasMany(MovimientoStock, { foreignKey: 'id_usuario', as: 'movimientosStock' });
+    MovimientoStock.belongsTo(Usuario, { foreignKey: 'id_usuario', as: 'usuario' });
 
-    console.log('🔗 Asociaciones establecidas correctamente');
+    console.log('✅ Asociaciones configuradas correctamente');
   } catch (error) {
     console.error('❌ Error configurando asociaciones:', error);
     throw error;

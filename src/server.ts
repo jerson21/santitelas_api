@@ -1,4 +1,4 @@
-// src/server.ts
+// src/server.ts - VERSIÓN CORREGIDA
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -6,7 +6,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import { sequelize } from './config/database';
-import { initializeModels } from './models';
+import { initializeModels, setupAssociations } from './models'; // ✅ IMPORTAR setupAssociations
 import routes from './routes';
 import { errorHandler } from './middlewares/errorHandler';
 import { seedDatabase } from './utils/seeder';
@@ -99,7 +99,8 @@ app.get('/', (req, res) => {
       '✅ Modelos con validaciones',
       '✅ WebSockets con Socket.IO',
       '✅ Autenticación JWT',
-      '✅ API RESTful'
+      '✅ API RESTful',
+      '✅ Estructura jerárquica de productos'
     ],
     endpoints: {
       health: '/api/health',
@@ -124,24 +125,30 @@ app.use('*', (req, res) => {
   });
 });
 
-// Función para inicializar la base de datos
+// ✅ FUNCIÓN CORREGIDA PARA INICIALIZAR LA BASE DE DATOS
 async function initializeDatabase() {
   try {
-    // Conectar a la base de datos
+    console.log('🔌 Conectando a la base de datos...');
     await sequelize.authenticate();
     console.log('✅ Conexión a MySQL establecida');
     
-    // Inicializar modelos
+    console.log('📊 Inicializando modelos...');
     await initializeModels();
     console.log('✅ Modelos Sequelize inicializados');
     
+    // ✅ CONFIGURAR ASOCIACIONES ANTES DE SYNC
+    console.log('🔗 Configurando asociaciones...');
+    setupAssociations();
+    console.log('✅ Asociaciones configuradas');
     
-    // Sincronizar modelos con la BD (ajusta esquema: agrega/actualiza columnas faltantes)
+    // Sincronizar con alter para ajustar esquema
+    console.log('🔄 Sincronizando esquema de base de datos...');
     await sequelize.sync({ alter: true });
     console.log('✅ Base de datos sincronizada (esquema ajustado)');
 
     // Sembrar datos iniciales si SEED_DATABASE=true
     if (process.env.SEED_DATABASE === 'true') {
+      console.log('🌱 Sembrando datos iniciales...');
       await seedDatabase();
       console.log('✅ Datos iniciales sembrados');
     }
@@ -175,14 +182,19 @@ async function startServer() {
       console.log(`🔐 Login: http://localhost:${PORT}/api/auth/login`);
       console.log('==========================================');
       console.log('📋 Endpoints disponibles:');
-      console.log(`   • Vendedor: http://localhost:${PORT}/api/vendedor`);
+      console.log(`   • Vendedor: http://localhost:${PORT}/api/vendedor/productos`);
       console.log(`   • Cajero: http://localhost:${PORT}/api/cajero`);
       console.log(`   • Admin: http://localhost:${PORT}/api/admin`);
+      console.log('==========================================');
+      console.log('🧪 Pruebas rápidas:');
+      console.log(`   curl ${PORT}/api/health`);
+      console.log(`   curl -X POST ${PORT}/api/auth/login -H "Content-Type: application/json" -d '{"username":"vendedor1","password":"vendedor123"}'`);
       console.log('==========================================');
       
       if (process.env.NODE_ENV === 'development') {
         console.log('⚠️  Modo desarrollo activo');
         console.log('📝 Logs SQL: Activados');
+        console.log('🌱 Para sembrar datos: SEED_DATABASE=true');
       }
     });
     

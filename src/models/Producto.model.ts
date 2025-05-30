@@ -1,4 +1,4 @@
-// src/models/Producto.model.ts - VERSIÓN LIMPIA
+// src/models/Producto.model.ts - VERSIÓN CORREGIDA CON MODALIDADES
 import { 
   Table, 
   Column, 
@@ -13,6 +13,7 @@ import {
 } from 'sequelize-typescript';
 import { Categoria } from './Categoria.model';
 import { VarianteProducto } from './VarianteProducto.model';
+import { ModalidadProducto } from './ModalidadProducto.model'; // ✅ AGREGAR IMPORT
 
 @Table({
   tableName: 'productos',
@@ -97,19 +98,25 @@ export class Producto extends Model {
 })
 precio_costo!: number;
 
-
-
-  // RELACIONES
+  // ✅ RELACIONES CORREGIDAS
   @BelongsTo(() => Categoria, 'id_categoria')
   categoria!: Categoria;
 
   @HasMany(() => VarianteProducto, 'id_producto')
   variantes!: VarianteProducto[];
 
-  // MÉTODOS
+  // ✅ AGREGAR RELACIÓN CON MODALIDADES
+  @HasMany(() => ModalidadProducto, 'id_producto')
+  modalidades!: ModalidadProducto[];
 
+  // ✅ MÉTODOS CORREGIDOS
   getVariantesActivas(): VarianteProducto[] {
     return this.variantes?.filter(v => v.activo) || [];
+  }
+
+  // ✅ NUEVO: Obtener modalidades activas
+  getModalidadesActivas(): ModalidadProducto[] {
+    return this.modalidades?.filter(m => m.activa) || [];
   }
 
   calcularStockTotal(): number {
@@ -120,20 +127,18 @@ precio_costo!: number;
     }, 0);
   }
 
+  // ✅ CORREGIDO: Obtener rangos de precios desde modalidades del producto
   getRangoPrecios(tipoDocumento: 'ticket' | 'boleta' | 'factura' = 'ticket'): { minimo: number; maximo: number } {
-    const variantes = this.getVariantesActivas();
+    const modalidades = this.getModalidadesActivas();
     
-    if (variantes.length === 0) {
+    if (modalidades.length === 0) {
       return { minimo: 0, maximo: 0 };
     }
 
     const precios: number[] = [];
     
-    variantes.forEach(variante => {
-      const modalidades = variante.getModalidadesActivas();
-      modalidades.forEach(modalidad => {
-        precios.push(modalidad.obtenerPrecioPorTipoDocumento(tipoDocumento));
-      });
+    modalidades.forEach(modalidad => {
+      precios.push(modalidad.obtenerPrecioPorTipoDocumento(tipoDocumento));
     });
 
     if (precios.length === 0) {
@@ -193,6 +198,7 @@ precio_costo!: number;
     }) || null;
   }
 
+  // ✅ CORREGIDO: Usar modalidades del producto
   getEstadisticas(): {
     total_variantes: number;
     total_modalidades: number;
@@ -204,23 +210,23 @@ precio_costo!: number;
     materiales_disponibles: string[];
   } {
     const variantes = this.getVariantesActivas();
+    const modalidades = this.getModalidadesActivas();
+    
     const colores = new Set<string>();
     const medidas = new Set<string>();
     const materiales = new Set<string>();
-    let totalModalidades = 0;
 
     variantes.forEach(variante => {
       if (variante.color) colores.add(variante.color);
       if (variante.medida) medidas.add(variante.medida);
       if (variante.material) materiales.add(variante.material);
-      totalModalidades += variante.getModalidadesActivas().length;
     });
 
     const precios = this.getRangoPrecios();
 
     return {
       total_variantes: variantes.length,
-      total_modalidades: totalModalidades,
+      total_modalidades: modalidades.length,
       stock_total: this.calcularStockTotal(),
       precio_minimo: precios.minimo,
       precio_maximo: precios.maximo,

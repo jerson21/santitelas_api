@@ -1,4 +1,4 @@
-// src/routes/vendedor.routes.ts - ARCHIVO COMPLETO CORREGIDO
+// src/routes/vendedor.routes.ts - VERSIÓN CORREGIDA CON TIPOS
 import { Router } from 'express';
 import { auth } from '../middlewares/auth';
 import { Producto } from '../models/Producto.model';
@@ -7,19 +7,10 @@ import { ModalidadProducto } from '../models/ModalidadProducto.model';
 import { Categoria } from '../models/Categoria.model';
 import { StockPorBodega } from '../models/StockPorBodega.model';
 import { Bodega } from '../models/Bodega.model';
-import { Op } from 'sequelize'; // ✅ CORRECCIÓN 1: Import correcto
+import { Op } from 'sequelize';
 
 const router = Router();
-
-// Todas las rutas requieren autenticación
 router.use(auth);
-
-/**
- * @openapi
- * tags:
- *   - name: vendedor
- *     description: Funcionalidades para vendedores
- */
 
 /**
  * @openapi
@@ -60,48 +51,12 @@ router.use(auth);
  *     responses:
  *       '200':
  *         description: Lista de productos para venta
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id_producto:
- *                         type: integer
- *                       codigo:
- *                         type: string
- *                       nombre:
- *                         type: string
- *                       categoria:
- *                         type: string
- *                       tipo:
- *                         type: string
- *                       descripcion_vendedor:
- *                         type: string
- *                       stock_total:
- *                         type: number
- *                       tiene_stock:
- *                         type: boolean
- *                       precio_desde:
- *                         type: number
- *                       precio_hasta:
- *                         type: number
- *                       variantes:
- *                         type: array
- *                         items:
- *                           type: object
  */
 router.get('/productos', async (req, res, next) => {
   try {
     const { categoria, tipo, search, con_stock = 'true', bodega_id } = req.query;
     
-    // Construir filtros
+    // Filtros
     const whereProducto: any = { activo: true };
     const whereStock: any = {};
     
@@ -124,6 +79,7 @@ router.get('/productos', async (req, res, next) => {
       whereStock.cantidad_disponible = { [Op.gt]: 0 };
     }
 
+    // Consulta principal
     const productos = await Producto.findAll({
       where: whereProducto,
       include: [
@@ -133,34 +89,32 @@ router.get('/productos', async (req, res, next) => {
           attributes: ['id_categoria', 'nombre']
         },
         {
+          model: ModalidadProducto,
+          as: 'modalidades',
+          where: { activa: true },
+          required: false,
+          attributes: [
+            'id_modalidad', 'nombre', 'descripcion', 'cantidad_base',
+            'es_cantidad_variable', 'minimo_cantidad', 'precio_neto',
+            'precio_neto_factura'
+          ]
+        },
+        {
           model: VarianteProducto,
           as: 'variantes',
           where: { activo: true },
           required: false,
-          include: [
-            {
-              model: ModalidadProducto,
-              as: 'modalidades',
-              where: { activa: true },
-              required: false,
-              attributes: [
-                'id_modalidad', 'nombre', 'descripcion', 'cantidad_base',
-                'es_cantidad_variable', 'minimo_cantidad', 'precio_neto',
-                'precio_neto_factura'
-              ]
-            },
-            {
-              model: StockPorBodega,
-              as: 'stockPorBodega',
-              where: whereStock,
-              required: con_stock === 'true',
-              include: [{
-                model: Bodega,
-                as: 'bodega',
-                attributes: ['id_bodega', 'nombre', 'codigo']
-              }]
-            }
-          ]
+          include: [{
+            model: StockPorBodega,
+            as: 'stockPorBodega',
+            where: whereStock,
+            required: con_stock === 'true',
+            include: [{
+              model: Bodega,
+              as: 'bodega',
+              attributes: ['id_bodega', 'nombre', 'codigo']
+            }]
+          }]
         }
       ],
       order: [
@@ -170,9 +124,9 @@ router.get('/productos', async (req, res, next) => {
       ]
     });
 
-    // Procesar productos para el vendedor
+    // ✅ PROCESAMIENTO CON TIPOS EXPLÍCITOS
     const productosVendedor = productos.map(producto => {
-      // ✅ CORRECCIÓN 2 y 3: Calcular stock con tipos explícitos
+      // Calcular stock total de todas las variantes
       const stockTotal = producto.variantes?.reduce((total: number, variante: any) => {
         const stockVariante = variante.stockPorBodega?.reduce((subTotal: number, stock: any) => 
           subTotal + Number(stock.cantidad_disponible), 0
@@ -180,10 +134,16 @@ router.get('/productos', async (req, res, next) => {
         return total + stockVariante;
       }, 0) || 0;
 
-      // ✅ CORRECCIÓN 4: Usar método correcto para obtener precios
-      const rangoPreciosTicket = producto.getRangoPrecios('ticket');
-      const rangoPreciosBoleta = producto.getRangoPrecios('boleta');
-      const rangoPreciosFactura = producto.getRangoPrecios('factura');
+      // ✅ OBTENER MODALIDADES CON TIPO EXPLÍCITO
+      const modalidades = producto.modalidades || [];
+      let precioMinimo = 0;
+      let precioMaximo = 0;
+
+      if (modalidades.length > 0) {
+        const precios = modalidades.map((m: any) => Number(m.precio_neto)); // ✅ TIPO EXPLÍCITO
+        precioMinimo = Math.min(...precios);
+        precioMaximo = Math.max(...precios);
+      }
 
       // Filtrar variantes con stock si es necesario
       const variantesConStock = producto.variantes?.filter(variante => {
@@ -200,43 +160,39 @@ router.get('/productos', async (req, res, next) => {
         nombre: producto.nombre,
         categoria: producto.categoria?.nombre || 'SIN CATEGORÍA',
         tipo: producto.tipo || 'SIN TIPO',
-        descripcion_vendedor: producto.getDescripcionVendedor(),
+        descripcion: producto.descripcion || '',
+        descripcion_completa: `${producto.tipo || ''} ${producto.nombre}`.trim(),
         stock_total: stockTotal,
         tiene_stock: stockTotal > 0,
         precios: {
-          ticket: {
-            desde: rangoPreciosTicket.minimo,
-            hasta: rangoPreciosTicket.maximo
-          },
-          boleta: {
-            desde: rangoPreciosBoleta.minimo,
-            hasta: rangoPreciosBoleta.maximo
-          },
-          factura: {
-            desde: rangoPreciosFactura.minimo,
-            hasta: rangoPreciosFactura.maximo
-          }
+          desde: precioMinimo,
+          hasta: precioMaximo,
+          rango: precioMinimo === precioMaximo 
+            ? `$${precioMinimo.toLocaleString('es-CL')}`
+            : `$${precioMinimo.toLocaleString('es-CL')} - $${precioMaximo.toLocaleString('es-CL')}`
         },
-        precio_desde: rangoPreciosTicket.minimo,
-        precio_hasta: rangoPreciosTicket.maximo,
         total_variantes: variantesConStock.length,
+        // ✅ MODALIDADES CON TIPO EXPLÍCITO
+        modalidades_disponibles: modalidades.map((modalidad: any) => ({
+          id_modalidad: modalidad.id_modalidad,
+          nombre: modalidad.nombre,
+          descripcion: modalidad.descripcion || '',
+          precio_neto: modalidad.precio_neto,
+          precio_con_iva: Math.round(Number(modalidad.precio_neto_factura) * 1.19),
+          es_variable: modalidad.es_cantidad_variable,
+          minimo: modalidad.minimo_cantidad
+        })),
         variantes: variantesConStock.map(variante => ({
           id_variante: variante.id_variante_producto,
           sku: variante.sku,
-          descripcion: variante.getDescripcionCompleta(),
+          color: variante.color,
+          medida: variante.medida,
+          material: variante.material,
+          descripcion: [variante.color, variante.medida, variante.material]
+            .filter(Boolean).join(' - ') || 'Estándar',
           stock_disponible: variante.stockPorBodega?.reduce((sum: number, stock: any) => 
             sum + Number(stock.cantidad_disponible), 0
-          ) || 0,
-          modalidades: variante.modalidades?.map(modalidad => ({
-            id_modalidad: modalidad.id_modalidad,
-            nombre: modalidad.nombre,
-            descripcion: modalidad.descripcion || '',
-            precio_ticket: modalidad.precio_neto,
-            precio_boleta: modalidad.precio_neto,
-            precio_factura: modalidad.precio_con_iva,
-            es_variable: modalidad.es_cantidad_variable,
-            minimo: modalidad.minimo_cantidad
-          })) || []
+          ) || 0
         }))
       };
     });
@@ -260,6 +216,7 @@ router.get('/productos', async (req, res, next) => {
     });
 
   } catch (error) {
+    console.error('❌ Error en GET /vendedor/productos:', error);
     next(error);
   }
 });
@@ -279,11 +236,6 @@ router.get('/productos', async (req, res, next) => {
  *         required: true
  *         schema:
  *           type: integer
- *       - in: query
- *         name: bodega_id
- *         schema:
- *           type: integer
- *         description: Ver stock en bodega específica
  *     responses:
  *       '200':
  *         description: Detalles completos del producto
@@ -307,29 +259,27 @@ router.get('/producto/:id', async (req, res, next) => {
           as: 'categoria'
         },
         {
+          model: ModalidadProducto,
+          as: 'modalidades',
+          where: { activa: true },
+          required: false
+        },
+        {
           model: VarianteProducto,
           as: 'variantes',
           where: { activo: true },
           required: false,
-          include: [
-            {
-              model: ModalidadProducto,
-              as: 'modalidades',
-              where: { activa: true },
-              required: false
-            },
-            {
-              model: StockPorBodega,
-              as: 'stockPorBodega',
-              where: whereStock,
-              required: false,
-              include: [{
-                model: Bodega,
-                as: 'bodega',
-                attributes: ['id_bodega', 'nombre', 'codigo', 'es_punto_venta']
-              }]
-            }
-          ]
+          include: [{
+            model: StockPorBodega,
+            as: 'stockPorBodega',
+            where: whereStock,
+            required: false,
+            include: [{
+              model: Bodega,
+              as: 'bodega',
+              attributes: ['id_bodega', 'nombre', 'codigo', 'es_punto_venta']
+            }]
+          }]
         }
       ]
     });
@@ -349,10 +299,6 @@ router.get('/producto/:id', async (req, res, next) => {
       return total + stockVariante;
     }, 0) || 0;
 
-    const rangoPreciosTicket = producto.getRangoPrecios('ticket');
-    const rangoPreciosBoleta = producto.getRangoPrecios('boleta');
-    const rangoPreciosFactura = producto.getRangoPrecios('factura');
-
     const productoDetalle = {
       id_producto: producto.id_producto,
       codigo: producto.codigo,
@@ -361,16 +307,23 @@ router.get('/producto/:id', async (req, res, next) => {
       categoria: producto.categoria?.nombre || 'SIN CATEGORÍA',
       tipo: producto.tipo || 'SIN TIPO',
       unidad_medida: producto.unidad_medida,
-      descripcion_completa: producto.getDescripcionCompleta(),
-      descripcion_vendedor: producto.getDescripcionVendedor(),
       stock_total: stockTotal,
       tiene_stock: stockTotal > 0,
       stock_minimo: producto.stock_minimo_total,
-      precios: {
-        ticket: rangoPreciosTicket,
-        boleta: rangoPreciosBoleta,
-        factura: rangoPreciosFactura
-      },
+      // ✅ MODALIDADES CON TIPO EXPLÍCITO
+      modalidades: producto.modalidades?.map((modalidad: any) => ({
+        id_modalidad: modalidad.id_modalidad,
+        nombre: modalidad.nombre,
+        descripcion: modalidad.descripcion,
+        cantidad_base: modalidad.cantidad_base,
+        es_cantidad_variable: modalidad.es_cantidad_variable,
+        minimo_cantidad: modalidad.minimo_cantidad,
+        precios: {
+          neto: modalidad.precio_neto,
+          factura: modalidad.precio_neto_factura,
+          con_iva: Math.round(Number(modalidad.precio_neto_factura) * 1.19)
+        }
+      })) || [],
       variantes: producto.variantes?.map(variante => {
         const stockVariante = variante.stockPorBodega?.reduce((sum: number, stock: any) => 
           sum + Number(stock.cantidad_disponible), 0
@@ -382,35 +335,16 @@ router.get('/producto/:id', async (req, res, next) => {
           color: variante.color,
           medida: variante.medida,
           material: variante.material,
-          descripcion: variante.getDescripcionCompleta(),
+          descripcion: [variante.color, variante.medida, variante.material]
+            .filter(Boolean).join(' - ') || 'Estándar',
           stock_disponible: stockVariante,
           tiene_stock: stockVariante > 0,
-          stock_por_bodega: variante.stockPorBodega?.map(stock => ({
+          stock_por_bodega: variante.stockPorBodega?.map((stock: any) => ({
             bodega: stock.bodega?.nombre,
             codigo_bodega: stock.bodega?.codigo,
             es_punto_venta: stock.bodega?.es_punto_venta,
             cantidad_disponible: stock.cantidad_disponible,
-            cantidad_reservada: stock.cantidad_reservada,
-            estado: stock.getEstadoStock()
-          })) || [],
-          modalidades: variante.modalidades?.map(modalidad => ({
-            id_modalidad: modalidad.id_modalidad,
-            nombre: modalidad.nombre,
-            descripcion: modalidad.descripcion,
-            cantidad_base: modalidad.cantidad_base,
-            es_cantidad_variable: modalidad.es_cantidad_variable,
-            minimo_cantidad: modalidad.minimo_cantidad,
-            precios: {
-              ticket: modalidad.precio_neto,
-              boleta: modalidad.precio_neto,
-              factura: modalidad.precio_con_iva,
-              costo: modalidad.precio_costo
-            },
-            precio_formateado: {
-              ticket: `$${modalidad.precio_neto.toLocaleString('es-CL')}`,
-              boleta: `$${modalidad.precio_neto.toLocaleString('es-CL')}`,
-              factura: `$${modalidad.precio_con_iva.toLocaleString('es-CL')}`
-            }
+            cantidad_reservada: stock.cantidad_reservada
           })) || []
         };
       }) || []
@@ -422,6 +356,7 @@ router.get('/producto/:id', async (req, res, next) => {
     });
 
   } catch (error) {
+    console.error('❌ Error en GET /vendedor/producto/:id:', error);
     next(error);
   }
 });
@@ -480,8 +415,7 @@ router.get('/buscar', async (req, res, next) => {
             [Op.or]: [
               { nombre: { [Op.iLike]: `%${q}%` } },
               { codigo: { [Op.iLike]: `%${q}%` } },
-              { tipo: { [Op.iLike]: `%${q}%` } },
-              { '$variantes.sku$': { [Op.iLike]: `%${q}%` } }
+              { tipo: { [Op.iLike]: `%${q}%` } }
             ]
           }
         ]
@@ -493,27 +427,25 @@ router.get('/buscar', async (req, res, next) => {
           attributes: ['nombre']
         },
         {
+          model: ModalidadProducto,
+          as: 'modalidades',
+          where: { activa: true },
+          required: false,
+          attributes: ['precio_neto'],
+          limit: 1,
+          order: [['precio_neto', 'ASC']]
+        },
+        {
           model: VarianteProducto,
           as: 'variantes',
           where: { activo: true },
           required: false,
-          include: [
-            {
-              model: ModalidadProducto,
-              as: 'modalidades',
-              where: { activa: true },
-              required: false,
-              attributes: ['precio_neto'],
-              limit: 1,
-              order: [['precio_neto', 'ASC']]
-            },
-            {
-              model: StockPorBodega,
-              as: 'stockPorBodega',
-              where: whereStock,
-              required: solo_con_stock === 'true'
-            }
-          ]
+          include: [{
+            model: StockPorBodega,
+            as: 'stockPorBodega',
+            where: whereStock,
+            required: solo_con_stock === 'true'
+          }]
         }
       ],
       limit: Number(limit),
@@ -528,10 +460,8 @@ router.get('/buscar', async (req, res, next) => {
         return total + stockVariante;
       }, 0) || 0;
 
-      const precioMinimo = producto.variantes
-        ?.flatMap((v: any) => v.modalidades?.map((m: any) => Number(m.precio_neto)) || [])
-        .filter(Boolean)
-        .reduce((min: number, precio: number) => Math.min(min, precio), Infinity) || 0;
+      // ✅ MODALIDADES CON TIPO EXPLÍCITO
+      const precioMinimo = producto.modalidades?.[0]?.precio_neto || 0;
 
       return {
         id_producto: producto.id_producto,
@@ -539,11 +469,11 @@ router.get('/buscar', async (req, res, next) => {
         nombre: producto.nombre,
         categoria: producto.categoria?.nombre,
         tipo: producto.tipo,
-        descripcion_completa: producto.getDescripcionCompleta(),
+        descripcion_completa: `${producto.tipo || ''} ${producto.nombre}`.trim(),
         stock_total: stockTotal,
         tiene_stock: stockTotal > 0,
-        precio_desde: precioMinimo === Infinity ? 0 : precioMinimo,
-        precio_formateado: precioMinimo === Infinity ? '$0' : `$${precioMinimo.toLocaleString('es-CL')}`
+        precio_desde: precioMinimo,
+        precio_formateado: `$${precioMinimo.toLocaleString('es-CL')}`
       };
     });
 
@@ -554,6 +484,7 @@ router.get('/buscar', async (req, res, next) => {
     });
 
   } catch (error) {
+    console.error('❌ Error en GET /vendedor/buscar:', error);
     next(error);
   }
 });
@@ -646,18 +577,17 @@ router.get('/stock/:productoId', async (req, res, next) => {
         return {
           id_variante: variante.id_variante_producto,
           sku: variante.sku,
-          descripcion: variante.getDescripcionCompleta(),
+          descripcion: [variante.color, variante.medida, variante.material]
+            .filter(Boolean).join(' - ') || 'Estándar',
           stock_total: stockVariante,
-          por_bodega: variante.stockPorBodega?.map(stock => ({
+          por_bodega: variante.stockPorBodega?.map((stock: any) => ({
             bodega_id: stock.bodega?.id_bodega,
             bodega_nombre: stock.bodega?.nombre,
             bodega_codigo: stock.bodega?.codigo,
             es_punto_venta: stock.bodega?.es_punto_venta,
             cantidad_disponible: stock.cantidad_disponible,
             cantidad_reservada: stock.cantidad_reservada,
-            stock_total: stock.cantidadTotal(),
-            estado: stock.getEstadoStock(),
-            porcentaje_vs_minimo: stock.getPorcentajeStock()
+            stock_total: Number(stock.cantidad_disponible) + Number(stock.cantidad_reservada)
           })) || []
         };
       }) || []

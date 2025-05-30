@@ -29,7 +29,7 @@ services:
       timeout: 10s
       retries: 5
       interval: 10s
-      start_period: 30s
+      start_period: 100s
 
   # ===== PHPMYADMIN =====
   phpmyadmin:

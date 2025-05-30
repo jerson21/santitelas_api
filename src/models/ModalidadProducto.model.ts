@@ -1,3 +1,4 @@
+// src/models/ModalidadProducto.model.ts - VERSIÓN CORREGIDA
 import { 
   Table, 
   Column, 
@@ -17,7 +18,7 @@ import { Producto } from './Producto.model';
   indexes: [
     { fields: ['activa'] },
     { fields: ['precio_neto'] },
-    { fields: ['id_producto', 'nombre'], unique: true } // Unique por producto y nombre
+    { fields: ['id_producto', 'nombre'], unique: true }
   ]
 })
 export class ModalidadProducto extends Model {
@@ -26,6 +27,7 @@ export class ModalidadProducto extends Model {
   @Column(DataType.INTEGER)
   id_modalidad!: number;
 
+  // ✅ CORRECCIÓN: Las modalidades van a nivel de PRODUCTO, no variante
   @ForeignKey(() => Producto)
   @Column({
     type: DataType.INTEGER,
@@ -37,7 +39,7 @@ export class ModalidadProducto extends Model {
     type: DataType.STRING(50),
     allowNull: false
   })
-  nombre!: string; // "Por metro", "Set de 4", "Embalaje 30"
+  nombre!: string; // "Por metro", "Rollo", "Embalaje"
 
   @Column({
     type: DataType.STRING(100),
@@ -49,7 +51,7 @@ export class ModalidadProducto extends Model {
     type: DataType.DECIMAL(10, 2),
     allowNull: false
   })
-  cantidad_base!: number; // 1, 4, 30
+  cantidad_base!: number;
 
   @Column({
     type: DataType.BOOLEAN,
@@ -82,7 +84,7 @@ export class ModalidadProducto extends Model {
   })
   precio_neto_factura!: number;
 
-  // Calculado en runtime, NO en BD
+  // Calculado en runtime
   get precio_con_iva(): number {
     return Math.round(Number(this.precio_neto_factura) * 1.19);
   }
@@ -105,12 +107,11 @@ export class ModalidadProducto extends Model {
   })
   fecha_actualizacion!: Date;
 
-  // RELACIONES
+  // ✅ RELACIÓN CORREGIDA: Con Producto
   @BelongsTo(() => Producto, 'id_producto')
   producto!: Producto;
 
-  // MÉTODOS
-
+  // ✅ MÉTODOS CORREGIDOS
   obtenerPrecioPorTipoDocumento(tipoDocumento: 'ticket' | 'boleta' | 'factura'): number {
     switch (tipoDocumento) {
       case 'ticket':
@@ -133,56 +134,11 @@ export class ModalidadProducto extends Model {
         mensaje: `Cantidad mínima requerida: ${this.minimo_cantidad}` 
       };
     }
-    if (!this.es_cantidad_variable && cantidad !== Math.floor(cantidad)) {
-      return { 
-        valida: false, 
-        mensaje: 'Esta modalidad no permite cantidades decimales' 
-      };
-    }
     return { valida: true };
   }
 
   calcularSubtotal(cantidad: number, tipoDocumento: 'ticket' | 'boleta' | 'factura' = 'ticket'): number {
     const precio = this.obtenerPrecioPorTipoDocumento(tipoDocumento);
     return Math.round(Number(cantidad) * precio);
-  }
-
-  getDescripcionCompleta(): string {
-    let descripcion = this.nombre;
-    if (this.descripcion) {
-      descripcion += ` - ${this.descripcion}`;
-    }
-    if (this.es_cantidad_variable && this.minimo_cantidad > 0) {
-      descripcion += ` (mín. ${this.minimo_cantidad})`;
-    }
-    return descripcion;
-  }
-
-  permiteDecimales(): boolean {
-    return this.es_cantidad_variable;
-  }
-
-  getInfoPrecios(): {
-    costo: number;
-    neto: number;
-    factura: number;
-    conIva: number;
-    margen: number;
-  } {
-    const costo = Number(this.precio_costo);
-    const neto = Number(this.precio_neto);
-    const factura = Number(this.precio_neto_factura);
-    const conIva = this.precio_con_iva;
-    const margen = costo > 0 && neto > costo 
-      ? ((neto - costo) / costo) * 100 
-      : 0;
-
-    return {
-      costo,
-      neto,
-      factura,
-      conIva,
-      margen: Math.round(margen * 100) / 100
-    };
   }
 }
