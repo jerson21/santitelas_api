@@ -1,4 +1,4 @@
-// src/models/ModalidadProducto.model.ts - VERSIÓN CORREGIDA
+﻿// src/models/ModalidadProducto.model.ts - VERSIÃ“N CORREGIDA
 import { 
   Table, 
   Column, 
@@ -27,7 +27,7 @@ export class ModalidadProducto extends Model {
   @Column(DataType.INTEGER)
   id_modalidad!: number;
 
-  // ✅ CORRECCIÓN: Las modalidades van a nivel de PRODUCTO, no variante
+  // âœ… CORRECCIÃ“N: Las modalidades van a nivel de PRODUCTO, no variante
   @ForeignKey(() => Producto)
   @Column({
     type: DataType.INTEGER,
@@ -107,11 +107,10 @@ export class ModalidadProducto extends Model {
   })
   fecha_actualizacion!: Date;
 
-  // ✅ RELACIÓN CORREGIDA: Con Producto
-  @BelongsTo(() => Producto, 'id_producto')
+  // âœ… RELACIÃ“N CORREGIDA: Con Producto
   producto!: Producto;
 
-  // ✅ MÉTODOS CORREGIDOS
+  // âœ… MÃ‰TODOS CORREGIDOS
   obtenerPrecioPorTipoDocumento(tipoDocumento: 'ticket' | 'boleta' | 'factura'): number {
     switch (tipoDocumento) {
       case 'ticket':
@@ -131,7 +130,7 @@ export class ModalidadProducto extends Model {
     if (this.minimo_cantidad > 0 && cantidad < this.minimo_cantidad) {
       return { 
         valida: false, 
-        mensaje: `Cantidad mínima requerida: ${this.minimo_cantidad}` 
+        mensaje: `Cantidad mÃ­nima requerida: ${this.minimo_cantidad}` 
       };
     }
     return { valida: true };

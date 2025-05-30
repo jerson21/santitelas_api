@@ -1,4 +1,4 @@
-// src/models/Venta.model.ts
+﻿// src/models/Venta.model.ts
 import { 
   Table, 
   Column, 
@@ -119,19 +119,14 @@ export class Venta extends Model {
   })
   fecha_venta!: Date;
 
-  @BelongsTo(() => Pedido, 'id_pedido')
   pedido!: Pedido;
 
-  @BelongsTo(() => TurnoCaja, 'id_turno')
   turno!: TurnoCaja;
 
-  @BelongsTo(() => TipoDocumento, 'id_tipo_documento')
   tipoDocumento!: TipoDocumento;
 
-  @BelongsTo(() => Bodega, 'id_bodega')
   bodega!: Bodega;
 
-  @HasMany(() => Pago, 'id_venta')
   pagos!: Pago[];
 
   calcularTotal() {

@@ -1,4 +1,4 @@
-// ===========================
+﻿// ===========================
 // src/models/TurnoCaja.model.ts
 import { 
   Table, 
@@ -99,19 +99,15 @@ export class TurnoCaja extends Model {
   @Column(DataType.TEXT)
   observaciones_cierre?: string;
 
-  @BelongsTo(() => Caja, 'id_caja')
   caja!: Caja;
 
-  @BelongsTo(() => Usuario, 'id_cajero')
   cajero!: Usuario;
 
-  @HasMany(() => Venta, 'id_turno')
   ventas!: Venta[];
 
-  @HasOne(() => ArqueoCaja, 'id_turno')
   arqueo?: ArqueoCaja;
 
-  // Métodos helpers
+  // MÃ©todos helpers
   estaAbierto(): boolean {
     return this.estado === 'abierto';
   }

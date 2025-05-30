@@ -1,4 +1,4 @@
-// ===========================
+﻿// ===========================
 // src/models/ArqueoCaja.model.ts
 import { 
   Table, 
@@ -113,10 +113,9 @@ export class ArqueoCaja extends Model {
   })
   fecha_arqueo!: Date;
 
-  @BelongsTo(() => TurnoCaja, 'id_turno')
   turno!: TurnoCaja;
 
-  // Métodos helpers
+  // MÃ©todos helpers
   calcularTotalContado(): void {
     this.total_contado = 
       (this.billetes_20000 * 20000) +

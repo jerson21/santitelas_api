@@ -1,4 +1,4 @@
-// ===========================
+﻿// ===========================
 // src/models/Caja.model.ts
 import { 
   Table, 
@@ -44,6 +44,5 @@ export class Caja extends Model {
   })
   fecha_creacion!: Date;
 
-  @HasMany(() => TurnoCaja, 'id_caja')
   turnos!: TurnoCaja[];
 }

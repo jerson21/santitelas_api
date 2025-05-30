@@ -1,4 +1,4 @@
-// ===== src/models/Subcategoria.model.ts =====
+﻿// ===== src/models/Subcategoria.model.ts =====
 import { 
   Table, 
   Column, 
@@ -63,9 +63,7 @@ export class Subcategoria extends Model {
   fecha_creacion!: Date;
 
   // Asociaciones
-  @BelongsTo(() => Categoria, 'id_categoria')
   categoria!: Categoria;
 
-  @HasMany(() => Producto, 'id_subcategoria')
   productos!: Producto[];
 }

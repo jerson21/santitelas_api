@@ -1,4 +1,4 @@
-// src/models/index.ts - ASOCIACIONES LIMPIAS SIN DUPLICADOS
+﻿// src/models/index.ts - ASOCIACIONES LIMPIAS SIN DUPLICADOS
 import { sequelize } from '../config/database';
 
 // Importar modelos completos
@@ -38,23 +38,24 @@ export async function initializeModels() {
       MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock
     ]);
 
-    console.log('📊 Modelos registrados:', Object.keys(sequelize.models).join(', '));
+    console.log('ðŸ“Š Modelos registrados:', Object.keys(sequelize.models).join(', '));
     
     // Luego configurar las asociaciones
     setupAssociations();
-    console.log('🔗 Asociaciones configuradas correctamente');
+    console.log('ðŸ”— Asociaciones configuradas correctamente');
     
     return true;
   } catch (error) {
-    console.error('❌ Error inicializando modelos:', error);
+    console.error('âŒ Error inicializando modelos:', error);
     throw error;
   }
 }
 
-// ✅ ASOCIACIONES LIMPIAS - SIN DUPLICADOS
+// âœ… ASOCIACIONES LIMPIAS - SIN DUPLICADOS
+// src/models/index.ts - setupAssociations() CORREGIDA
 export function setupAssociations() {
   try {
-    console.log('🔗 Configurando asociaciones sin duplicados...');
+    console.log('ðŸ”— Configurando asociaciones sin duplicados...');
 
     // Verificar que todos los modelos existen antes de crear asociaciones
     const models = sequelize.models;
@@ -75,7 +76,7 @@ export function setupAssociations() {
     Usuario.belongsTo(Rol, { foreignKey: 'id_rol', as: 'rol' });
     Rol.hasMany(Usuario, { foreignKey: 'id_rol', as: 'usuarios' });
 
-    // === PRODUCTOS Y CATEGORÍAS ===
+    // === PRODUCTOS Y CATEGORÃAS ===
     Producto.belongsTo(Categoria, { foreignKey: 'id_categoria', as: 'categoria' });
     Categoria.hasMany(Producto, { foreignKey: 'id_categoria', as: 'productos' });
 
@@ -83,7 +84,7 @@ export function setupAssociations() {
     VarianteProducto.belongsTo(Producto, { foreignKey: 'id_producto', as: 'producto' });
     Producto.hasMany(VarianteProducto, { foreignKey: 'id_producto', as: 'variantes' });
 
-    // === MODALIDADES A NIVEL DE PRODUCTO ===
+    // âœ… MODALIDADES A NIVEL DE PRODUCTO (CORREGIDO)
     ModalidadProducto.belongsTo(Producto, { foreignKey: 'id_producto', as: 'producto' });
     Producto.hasMany(ModalidadProducto, { foreignKey: 'id_producto', as: 'modalidades' });
 
@@ -146,7 +147,7 @@ export function setupAssociations() {
     MetodoPago.hasMany(Pago, { foreignKey: 'id_metodo_pago', as: 'pagos' });
     Pago.belongsTo(MetodoPago, { foreignKey: 'id_metodo_pago', as: 'metodoPago' });
 
-    // === MOVIMIENTOS DE STOCK ===
+    // âœ… MOVIMIENTOS DE STOCK CORREGIDOS
     VarianteProducto.hasMany(MovimientoStock, { foreignKey: 'id_variante_producto', as: 'movimientos' });
     MovimientoStock.belongsTo(VarianteProducto, { foreignKey: 'id_variante_producto', as: 'varianteProducto' });
     
@@ -159,9 +160,9 @@ export function setupAssociations() {
     Usuario.hasMany(MovimientoStock, { foreignKey: 'id_usuario', as: 'movimientosStock' });
     MovimientoStock.belongsTo(Usuario, { foreignKey: 'id_usuario', as: 'usuario' });
 
-    console.log('✅ Asociaciones configuradas correctamente');
+    console.log('âœ… Asociaciones configuradas correctamente');
   } catch (error) {
-    console.error('❌ Error configurando asociaciones:', error);
+    console.error('âŒ Error configurando asociaciones:', error);
     throw error;
   }
 }

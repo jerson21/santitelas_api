@@ -1,4 +1,4 @@
-// src/models/Producto.model.ts - VERSIÓN CORREGIDA CON MODALIDADES
+﻿// src/models/Producto.model.ts - VERSIÃ“N CORREGIDA CON MODALIDADES
 import { 
   Table, 
   Column, 
@@ -13,7 +13,7 @@ import {
 } from 'sequelize-typescript';
 import { Categoria } from './Categoria.model';
 import { VarianteProducto } from './VarianteProducto.model';
-import { ModalidadProducto } from './ModalidadProducto.model'; // ✅ AGREGAR IMPORT
+import { ModalidadProducto } from './ModalidadProducto.model'; // âœ… AGREGAR IMPORT
 
 @Table({
   tableName: 'productos',
@@ -98,23 +98,20 @@ export class Producto extends Model {
 })
 precio_costo!: number;
 
-  // ✅ RELACIONES CORREGIDAS
-  @BelongsTo(() => Categoria, 'id_categoria')
+  // âœ… RELACIONES CORREGIDAS
   categoria!: Categoria;
 
-  @HasMany(() => VarianteProducto, 'id_producto')
   variantes!: VarianteProducto[];
 
-  // ✅ AGREGAR RELACIÓN CON MODALIDADES
-  @HasMany(() => ModalidadProducto, 'id_producto')
+  // âœ… AGREGAR RELACIÃ“N CON MODALIDADES
   modalidades!: ModalidadProducto[];
 
-  // ✅ MÉTODOS CORREGIDOS
+  // âœ… MÃ‰TODOS CORREGIDOS
   getVariantesActivas(): VarianteProducto[] {
     return this.variantes?.filter(v => v.activo) || [];
   }
 
-  // ✅ NUEVO: Obtener modalidades activas
+  // âœ… NUEVO: Obtener modalidades activas
   getModalidadesActivas(): ModalidadProducto[] {
     return this.modalidades?.filter(m => m.activa) || [];
   }
@@ -127,7 +124,7 @@ precio_costo!: number;
     }, 0);
   }
 
-  // ✅ CORREGIDO: Obtener rangos de precios desde modalidades del producto
+  // âœ… CORREGIDO: Obtener rangos de precios desde modalidades del producto
   getRangoPrecios(tipoDocumento: 'ticket' | 'boleta' | 'factura' = 'ticket'): { minimo: number; maximo: number } {
     const modalidades = this.getModalidadesActivas();
     
@@ -198,7 +195,7 @@ precio_costo!: number;
     }) || null;
   }
 
-  // ✅ CORREGIDO: Usar modalidades del producto
+  // âœ… CORREGIDO: Usar modalidades del producto
   getEstadisticas(): {
     total_variantes: number;
     total_modalidades: number;

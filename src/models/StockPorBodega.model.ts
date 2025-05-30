@@ -1,4 +1,4 @@
-// src/models/StockPorBodega.model.ts - VERSIÓN CORRECTA
+﻿// src/models/StockPorBodega.model.ts - VERSIÃ“N CORRECTA
 import { 
   Table, 
   Column, 
@@ -70,13 +70,11 @@ export class StockPorBodega extends Model {
   fecha_actualizacion!: Date;
 
   // RELACIONES
-  @BelongsTo(() => VarianteProducto, 'id_variante_producto')
   varianteProducto!: VarianteProducto;
 
-  @BelongsTo(() => Bodega, 'id_bodega')
   bodega!: Bodega;
 
-  // MÉTODOS
+  // MÃ‰TODOS
   tieneDisponibilidad(cantidad: number): boolean {
     return this.cantidad_disponible >= cantidad;
   }

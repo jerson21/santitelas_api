@@ -1,4 +1,4 @@
-// ===========================
+﻿// ===========================
 // src/models/Bodega.model.ts
 import { 
   Table, 
@@ -62,12 +62,9 @@ export class Bodega extends Model {
   })
   fecha_creacion!: Date;
 
-  @HasMany(() => StockPorBodega, 'id_bodega')
   stock!: StockPorBodega[];
 
-  @HasMany(() => Venta, 'id_bodega')
   ventas!: Venta[];
 
-  @HasMany(() => MovimientoStock, 'id_bodega')
   movimientos!: MovimientoStock[];
 }

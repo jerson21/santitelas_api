@@ -1,4 +1,4 @@
-// src/models/Cliente.model.ts
+﻿// src/models/Cliente.model.ts
 import { 
   Table, 
   Column, 
@@ -33,7 +33,7 @@ export class Cliente extends Model {
   })
   tipo_cliente!: string;
 
-  // Datos básicos
+  // Datos bÃ¡sicos
   @Column({
     type: DataType.STRING(100)
   })
@@ -84,10 +84,9 @@ export class Cliente extends Model {
   fecha_actualizacion!: Date;
 
   // Relaciones
-  @HasMany(() => Pedido, 'id_cliente')
   pedidos!: Pedido[];
 
-  // Métodos helper
+  // MÃ©todos helper
   esEmpresa(): boolean {
     return this.tipo_cliente === 'empresa';
   }

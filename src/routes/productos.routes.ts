@@ -1,4 +1,4 @@
-// src/routes/productos.routes.ts - VERSIÓN ACTUALIZADA PARA ESTRUCTURA JERÁRQUICA
+// src/routes/productos.routes.ts - VERSIÓN CORREGIDA
 import { Router } from 'express';
 import { auth } from '../middlewares/auth';
 import { Producto } from '../models/Producto.model';
@@ -23,159 +23,6 @@ router.use(auth);
  *     description: Consultas del catálogo de productos
  *   - name: estructura
  *     description: Obtener la estructura jerárquica de productos
- */
-
-/**
- * @openapi
- * components:
- *   schemas:
- *     ProductoJerarquico:
- *       type: object
- *       properties:
- *         id_producto:
- *           type: integer
- *           example: 1
- *         categoria:
- *           type: string
- *           example: "TELAS"
- *           description: "Categoría principal (TELAS, CORCHETES, PATAS, BOTONES)"
- *         tipo:
- *           type: string
- *           example: "LINO"
- *           description: "Tipo de producto (LINO, FELPA, PATA CONICA, BOTON DIAMANTE)"
- *         modelo:
- *           type: string
- *           example: "GABANNA"
- *           description: "Modelo específico (GABANNA, GUCCI, CARTIER, DIOR)"
- *         codigo:
- *           type: string
- *           example: "TEL-LIN-GAB-001"
- *         descripcion:
- *           type: string
- *         unidad_medida:
- *           type: string
- *           enum: [metro, unidad, kilogramo, litros]
- *         opciones:
- *           type: array
- *           description: "Variantes disponibles (colores, números, medidas)"
- *           items:
- *             type: object
- *             properties:
- *               id_variante:
- *                 type: integer
- *               sku:
- *                 type: string
- *               color:
- *                 type: string
- *                 example: "Azul"
- *               medida:
- *                 type: string
- *                 example: "71"
- *               material:
- *                 type: string
- *               descripcion_opcion:
- *                 type: string
- *               stock_total:
- *                 type: number
- *               modalidades:
- *                 type: array
- *                 items:
- *                   $ref: '#/components/schemas/ModalidadVenta'
- *         resumen_precios:
- *           type: object
- *           properties:
- *             precio_minimo:
- *               type: number
- *             precio_maximo:
- *               type: number
- *             rango_precios:
- *               type: string
- *               example: "$8.500 - $12.000"
- *     
- *     ModalidadVenta:
- *       type: object
- *       properties:
- *         id_modalidad:
- *           type: integer
- *         nombre:
- *           type: string
- *           example: "METRO"
- *           description: "METRO, ROLLO, KILO, UNIDAD, EMBALAJE"
- *         descripcion:
- *           type: string
- *         cantidad_base:
- *           type: number
- *         es_cantidad_variable:
- *           type: boolean
- *         minimo_cantidad:
- *           type: number
- *         precios:
- *           type: object
- *           properties:
- *             costo:
- *               type: number
- *             neto:
- *               type: number
- *             factura:
- *               type: number
- *             con_iva:
- *               type: number
- *     
- *     EstructuraJerarquica:
- *       type: object
- *       properties:
- *         categorias:
- *           type: array
- *           items:
- *             type: object
- *             properties:
- *               nombre:
- *                 type: string
- *                 example: "TELAS"
- *               tipos:
- *                 type: array
- *                 items:
- *                   type: object
- *                   properties:
- *                     nombre:
- *                       type: string
- *                       example: "LINO"
- *                     modelos:
- *                       type: array
- *                       items:
- *                         type: string
- *                         example: "GABANNA"
- *     
- *     FiltrosBusqueda:
- *       type: object
- *       properties:
- *         categoria:
- *           type: string
- *           example: "TELAS"
- *         tipo:
- *           type: string
- *           example: "LINO"
- *         modelo:
- *           type: string
- *           example: "GABANNA"
- *         color:
- *           type: string
- *           example: "Azul"
- *         medida:
- *           type: string
- *           example: "71"
- *         modalidad:
- *           type: string
- *           example: "METRO"
- *         precio_min:
- *           type: number
- *         precio_max:
- *           type: number
- *         con_stock:
- *           type: boolean
- *         termino_busqueda:
- *           type: string
- *           description: "Búsqueda en nombre, código o descripción"
  */
 
 // ===========================
@@ -257,31 +104,6 @@ router.use(auth);
  *     responses:
  *       '200':
  *         description: Catálogo de productos con estructura jerárquica
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/ProductoJerarquico'
- *                 pagination:
- *                   type: object
- *                   properties:
- *                     page:
- *                       type: integer
- *                     limit:
- *                       type: integer
- *                     total:
- *                       type: integer
- *                     pages:
- *                       type: integer
- *                 filtros_aplicados:
- *                   type: object
  */
 router.get('/catalogo', async (req, res, next) => {
   try {
@@ -349,23 +171,24 @@ router.get('/catalogo', async (req, res, next) => {
           as: 'categoria',
           attributes: ['id_categoria', 'nombre']
         },
+        // ✅ MODALIDADES A NIVEL DE PRODUCTO (CORREGIDO)
+        {
+          model: ModalidadProducto,
+          as: 'modalidades',
+          where: whereModalidades,
+          required: true,
+          attributes: [
+            'id_modalidad', 'nombre', 'descripcion', 'cantidad_base',
+            'es_cantidad_variable', 'minimo_cantidad', 'precio_costo',
+            'precio_neto', 'precio_neto_factura'
+          ]
+        },
         {
           model: VarianteProducto,
           as: 'variantes',
           where: whereVariante,
           required: true,
           include: [
-            {
-              model: ModalidadProducto,
-              as: 'modalidades',
-              where: whereModalidades,
-              required: true,
-              attributes: [
-                'id_modalidad', 'nombre', 'descripcion', 'cantidad_base',
-                'es_cantidad_variable', 'minimo_cantidad', 'precio_costo',
-                'precio_neto', 'precio_neto_factura', 'precio_con_iva', 'activa'
-              ]
-            },
             {
               model: StockPorBodega,
               as: 'stockPorBodega',
@@ -393,6 +216,9 @@ router.get('/catalogo', async (req, res, next) => {
     const catalogoEstructurado = productos.map(producto => {
       const productData = producto.toJSON();
       
+      // ✅ MODALIDADES DEL PRODUCTO (no de la variante)
+      const modalidadesProducto = productData.modalidades || [];
+      
       // Calcular stock total y filtrar si es necesario
       const variantes = productData.variantes.map((variante: any) => {
         const stockTotal = variante.stockPorBodega?.reduce(
@@ -415,7 +241,8 @@ router.get('/catalogo', async (req, res, next) => {
             .filter(Boolean).join(' - ') || 'Estándar',
           stock_total: stockTotal,
           tiene_stock: stockTotal > 0,
-          modalidades: variante.modalidades.map((modalidad: any) => ({
+          // ✅ MODALIDADES DESDE EL PRODUCTO
+          modalidades: modalidadesProducto.map((modalidad: any) => ({
             id_modalidad: modalidad.id_modalidad,
             nombre: modalidad.nombre,
             descripcion: modalidad.descripcion,
@@ -426,15 +253,15 @@ router.get('/catalogo', async (req, res, next) => {
               costo: modalidad.precio_costo,
               neto: modalidad.precio_neto,
               factura: modalidad.precio_neto_factura,
-              con_iva: modalidad.precio_con_iva
+              con_iva: Math.round(Number(modalidad.precio_neto_factura) * 1.19)
             }
           }))
         };
       }).filter(Boolean);
 
       // Calcular rango de precios
-      const todosPrecios = variantes
-        .flatMap((v: any) => v.modalidades.map((m: any) => m.precios.neto))
+      const todosPrecios = modalidadesProducto
+        .map((m: any) => m.precio_neto)
         .filter(Boolean);
       
       const precioMinimo = todosPrecios.length > 0 ? Math.min(...todosPrecios) : 0;
@@ -458,7 +285,7 @@ router.get('/catalogo', async (req, res, next) => {
         },
         estadisticas: {
           total_opciones: variantes.length,
-          total_modalidades: variantes.reduce((sum: number, v: any) => sum + v.modalidades.length, 0),
+          total_modalidades: modalidadesProducto.length,
           tiene_stock: variantes.some((v: any) => v.tiene_stock)
         }
       };
@@ -500,16 +327,6 @@ router.get('/catalogo', async (req, res, next) => {
  *     responses:
  *       '200':
  *         description: Estructura jerárquica del catálogo
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/EstructuraJerarquica'
  */
 router.get('/estructura', async (req, res, next) => {
   try {
@@ -526,14 +343,15 @@ router.get('/estructura', async (req, res, next) => {
           model: VarianteProducto,
           as: 'variantes',
           where: { activo: true },
+          required: false
+        },
+        // ✅ MODALIDADES A NIVEL DE PRODUCTO
+        {
+          model: ModalidadProducto,
+          as: 'modalidades',
+          where: { activa: true },
           required: false,
-          include: [{
-            model: ModalidadProducto,
-            as: 'modalidades',
-            where: { activa: true },
-            required: false,
-            attributes: ['nombre']
-          }]
+          attributes: ['nombre']
         }
       ],
       order: [
@@ -573,11 +391,11 @@ router.get('/estructura', async (req, res, next) => {
         if (variante.color) estructura[categoria][tipo].colores.add(variante.color);
         if (variante.medida) estructura[categoria][tipo].medidas.add(variante.medida);
         if (variante.material) estructura[categoria][tipo].materiales.add(variante.material);
-        
-        // Agregar modalidades
-        variante.modalidades?.forEach(modalidad => {
-          estructura[categoria][tipo].modalidades.add(modalidad.nombre);
-        });
+      });
+      
+      // ✅ MODALIDADES DESDE EL PRODUCTO
+      producto.modalidades?.forEach(modalidad => {
+        estructura[categoria][tipo].modalidades.add(modalidad.nombre);
       });
     });
 
@@ -637,15 +455,6 @@ router.get('/estructura', async (req, res, next) => {
  *     responses:
  *       '200':
  *         description: Producto con información completa
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   $ref: '#/components/schemas/ProductoJerarquico'
  *       '404':
  *         description: Producto no encontrado
  */
@@ -659,16 +468,17 @@ router.get('/:id', async (req, res, next) => {
           model: Categoria,
           as: 'categoria'
         },
+        // ✅ MODALIDADES A NIVEL DE PRODUCTO
+        {
+          model: ModalidadProducto,
+          as: 'modalidades',
+          where: { activa: true },
+          required: false
+        },
         {
           model: VarianteProducto,
           as: 'variantes',
           include: [
-            {
-              model: ModalidadProducto,
-              as: 'modalidades',
-              where: { activa: true },
-              required: false
-            },
             {
               model: StockPorBodega,
               as: 'stockPorBodega',
@@ -693,6 +503,9 @@ router.get('/:id', async (req, res, next) => {
     // Procesar para estructura jerárquica
     const productData = producto.toJSON();
     
+    // ✅ MODALIDADES DEL PRODUCTO
+    const modalidadesProducto = productData.modalidades || [];
+    
     const variantes = productData.variantes.map((variante: any) => {
       const stockTotal = variante.stockPorBodega?.reduce(
         (sum: number, stock: any) => sum + stock.cantidad_disponible, 0
@@ -715,7 +528,8 @@ router.get('/:id', async (req, res, next) => {
           cantidad_disponible: stock.cantidad_disponible,
           cantidad_reservada: stock.cantidad_reservada
         })),
-        modalidades: variante.modalidades.map((modalidad: any) => ({
+        // ✅ MODALIDADES DESDE EL PRODUCTO
+        modalidades: modalidadesProducto.map((modalidad: any) => ({
           id_modalidad: modalidad.id_modalidad,
           nombre: modalidad.nombre,
           descripcion: modalidad.descripcion,
@@ -726,14 +540,14 @@ router.get('/:id', async (req, res, next) => {
             costo: modalidad.precio_costo,
             neto: modalidad.precio_neto,
             factura: modalidad.precio_neto_factura,
-            con_iva: modalidad.precio_con_iva
+            con_iva: Math.round(Number(modalidad.precio_neto_factura) * 1.19)
           }
         }))
       };
     });
 
-    const todosPrecios = variantes
-      .flatMap((v: any) => v.modalidades.map((m: any) => m.precios.neto))
+    const todosPrecios = modalidadesProducto
+      .map((m: any) => m.precio_neto)
       .filter(Boolean);
     
     const precioMinimo = todosPrecios.length > 0 ? Math.min(...todosPrecios) : 0;
@@ -758,7 +572,7 @@ router.get('/:id', async (req, res, next) => {
       },
       estadisticas: {
         total_opciones: variantes.length,
-        total_modalidades: variantes.reduce((sum: number, v: any) => sum + v.modalidades.length, 0),
+        total_modalidades: modalidadesProducto.length,
         stock_total: variantes.reduce((sum: number, v: any) => sum + v.stock_total, 0),
         tiene_stock: variantes.some((v: any) => v.tiene_stock)
       }
@@ -799,32 +613,6 @@ router.get('/:id', async (req, res, next) => {
  *     responses:
  *       '200':
  *         description: Resultados de búsqueda rápida
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id_producto:
- *                         type: integer
- *                       categoria:
- *                         type: string
- *                       tipo:
- *                         type: string
- *                       modelo:
- *                         type: string
- *                       codigo:
- *                         type: string
- *                       descripcion_completa:
- *                         type: string
- *                       precio_desde:
- *                         type: number
  */
 router.get('/buscar/rapida', async (req, res, next) => {
   try {
@@ -857,19 +645,24 @@ router.get('/buscar/rapida', async (req, res, next) => {
           as: 'categoria',
           attributes: ['nombre']
         },
+        // ✅ MODALIDADES DEL PRODUCTO
+        {
+          model: ModalidadProducto,
+          as: 'modalidades',
+          where: { activa: true },
+          required: false,
+          attributes: ['precio_neto'],
+          limit: 1,
+          order: [['precio_neto', 'ASC']]
+        },
         {
           model: VarianteProducto,
           as: 'variantes',
           where: { activo: true },
           required: false,
           include: [{
-            model: ModalidadProducto,
-            as: 'modalidades',
-            where: { activa: true },
-            required: false,
-            attributes: ['precio_neto'],
-            limit: 1,
-            order: [['precio_neto', 'ASC']]
+            model: StockPorBodega,
+            as: 'stockPorBodega'
           }]
         }
       ],
@@ -881,8 +674,8 @@ router.get('/buscar/rapida', async (req, res, next) => {
       const productData = producto.toJSON();
       
       // Encontrar el precio más bajo
-      const precioMinimo = productData.variantes
-        ?.flatMap((v: any) => v.modalidades?.map((m: any) => m.precio_neto) || [])
+      const precioMinimo = productData.modalidades
+        ?.map((m: any) => m.precio_neto)
         .filter(Boolean)
         .reduce((min: number, precio: number) => Math.min(min, precio), Infinity) || 0;
 

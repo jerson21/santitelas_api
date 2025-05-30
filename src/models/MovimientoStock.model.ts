@@ -1,4 +1,4 @@
-// src/models/MovimientoStock.model.ts
+﻿// src/models/MovimientoStock.model.ts - VERSIÃ“N CORREGIDA
 import { 
   Table, 
   Column, 
@@ -9,7 +9,7 @@ import {
   BelongsTo,
   ForeignKey
 } from 'sequelize-typescript';
-import { Producto } from './Producto.model';
+import { VarianteProducto } from './VarianteProducto.model';  // âœ… CORREGIDO
 import { Bodega } from './Bodega.model';
 import { Usuario } from './Usuario.model';
 
@@ -23,12 +23,13 @@ export class MovimientoStock extends Model {
   @Column(DataType.INTEGER)
   id_movimiento!: number;
 
-  @ForeignKey(() => Producto)
+  // âœ… CORREGIDO: Usar id_variante_producto como en el SQL
+  @ForeignKey(() => VarianteProducto)
   @Column({
     type: DataType.INTEGER,
     allowNull: false
   })
-  id_producto!: number;
+  id_variante_producto!: number;
 
   @ForeignKey(() => Bodega)
   @Column({
@@ -65,7 +66,7 @@ export class MovimientoStock extends Model {
   @Column({
     type: DataType.INTEGER
   })
-  id_bodega_destino?: number; // Para transferencias
+  id_bodega_destino?: number;
 
   @Column({
     type: DataType.STRING(100),
@@ -91,15 +92,12 @@ export class MovimientoStock extends Model {
   })
   fecha_movimiento!: Date;
 
-  @BelongsTo(() => Producto, 'id_producto')
-  producto!: Producto;
+  // âœ… RELACIONES CORREGIDAS
+  varianteProducto!: VarianteProducto;
 
-  @BelongsTo(() => Bodega, 'id_bodega')
   bodega!: Bodega;
 
-  @BelongsTo(() => Bodega, 'id_bodega_destino')
   bodegaDestino?: Bodega;
 
-  @BelongsTo(() => Usuario, 'id_usuario')
   usuario!: Usuario;
 }

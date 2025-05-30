@@ -1,4 +1,4 @@
-// src/models/Categoria.model.ts
+﻿// src/models/Categoria.model.ts
 import { 
   Table, 
   Column, 
@@ -42,6 +42,5 @@ export class Categoria extends Model {
   })
   fecha_creacion!: Date;
 
-  @HasMany(() => Producto, 'id_categoria')
   productos!: Producto[];
 }

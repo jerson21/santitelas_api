@@ -1,4 +1,4 @@
-// src/models/Pedido.model.ts
+﻿// src/models/Pedido.model.ts
 import {
   Table,
   Column,
@@ -119,19 +119,15 @@ export class Pedido extends Model {
   fecha_actualizacion!: Date;
 
   // RELACIONES
-  @BelongsTo(() => Usuario, 'id_vendedor')
   vendedor!: Usuario;
 
-  @BelongsTo(() => Cliente, 'id_cliente')
   cliente?: Cliente;
 
-  @HasMany(() => DetallePedido, 'id_pedido')
   detalles!: DetallePedido[];
 
-  @HasOne(() => Venta, 'id_pedido')
   venta?: Venta;
 
-  // ===== MÉTODOS DE NEGOCIO Y HELPERS =====
+  // ===== MÃ‰TODOS DE NEGOCIO Y HELPERS =====
 
   calcularTotales() {
     this.total = Number(this.subtotal) - Number(this.descuento);
@@ -146,11 +142,11 @@ export class Pedido extends Model {
     const descripciones: Record<EstadoPedido, string> = {
       borrador: 'En proceso',
       pendiente: 'Listo para procesar',
-      vale_pendiente: '📋 Esperando en caja',
-      procesando_caja: '⏳ Procesando pago',
-      pagado_datos_pendientes: '💰 Pagado - Faltan datos',
-      completado: '✅ Completado',
-      cancelado: '❌ Cancelado'
+      vale_pendiente: 'ðŸ“‹ Esperando en caja',
+      procesando_caja: 'â³ Procesando pago',
+      pagado_datos_pendientes: 'ðŸ’° Pagado - Faltan datos',
+      completado: 'âœ… Completado',
+      cancelado: 'âŒ Cancelado'
     };
     return descripciones[this.estado] || this.estado;
   }
@@ -177,7 +173,7 @@ export class Pedido extends Model {
     }
     switch (this.tipo_documento) {
       case 'ticket':
-        return 'Cliente anónimo';
+        return 'Cliente anÃ³nimo';
       case 'factura':
         return 'Empresa (datos pendientes)';
       default:

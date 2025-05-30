@@ -1,5 +1,5 @@
-
-// src/models/DetallePedido.model.ts - ACTUALIZACIÓN COMPLETA
+﻿
+// src/models/DetallePedido.model.ts - ACTUALIZACIÃ“N COMPLETA
 import { 
   Table, 
   Column, 
@@ -93,19 +93,15 @@ export class DetallePedido extends Model {
   fecha_creacion!: Date;
 
   // RELACIONES ACTUALIZADAS
-  @BelongsTo(() => Pedido, 'id_pedido')
   pedido!: Pedido;
 
-  @BelongsTo(() => VarianteProducto, 'id_variante_producto')
   varianteProducto!: VarianteProducto;
 
-  @BelongsTo(() => ModalidadProducto, 'id_modalidad')
   modalidad!: ModalidadProducto;
 
-  @BelongsTo(() => Usuario, 'precio_autorizado_por')
   usuarioAutorizador?: Usuario;
 
-  // MÉTODOS ACTUALIZADOS
+  // MÃ‰TODOS ACTUALIZADOS
   calcularSubtotal(): number {
     return Math.round(this.cantidad * this.precio_unitario);
   }

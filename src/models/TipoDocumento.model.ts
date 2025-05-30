@@ -1,4 +1,4 @@
-// src/models/TipoDocumento.model.ts
+﻿// src/models/TipoDocumento.model.ts
 import { 
   Table, 
   Column, 
@@ -67,6 +67,5 @@ export class TipoDocumento extends Model {
   })
   fecha_creacion!: Date;
 
-  @HasMany(() => Venta, 'id_tipo_documento')
   ventas!: Venta[];
 }

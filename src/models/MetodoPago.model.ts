@@ -1,4 +1,4 @@
-// src/models/MetodoPago.model.ts
+﻿// src/models/MetodoPago.model.ts
 import { 
   Table, 
   Column, 
@@ -58,6 +58,5 @@ export class MetodoPago extends Model {
   })
   fecha_creacion!: Date;
 
-  @HasMany(() => Pago, 'id_metodo_pago')
   pagos!: Pago[];
 }

@@ -1,4 +1,4 @@
-// src/models/SerieDocumento.model.ts
+﻿// src/models/SerieDocumento.model.ts
 import { 
   Table, 
   Column, 
@@ -101,16 +101,14 @@ export class SerieDocumento extends Model {
   fecha_actualizacion!: Date;
 
   // Asociaciones
-  @BelongsTo(() => TipoDocumento, 'id_tipo_documento')
   tipoDocumento!: TipoDocumento;
 
-  @HasMany(() => Venta, 'id_serie')
   ventas!: Venta[];
 
-  // Métodos helpers
+  // MÃ©todos helpers
   obtenerSiguienteNumero(): number {
     if (this.numero_actual >= this.numero_final) {
-      throw new Error(`Serie ${this.serie} ha alcanzado el número final`);
+      throw new Error(`Serie ${this.serie} ha alcanzado el nÃºmero final`);
     }
     return this.numero_actual + 1;
   }

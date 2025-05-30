@@ -1,4 +1,4 @@
-// src/models/Rol.model.ts
+﻿// src/models/Rol.model.ts
 import { 
   Table, 
   Column, 
@@ -51,6 +51,5 @@ export class Rol extends Model {
   })
   fecha_creacion!: Date;
 
-  @HasMany(() => Usuario, 'id_rol')
   usuarios!: Usuario[];
 }

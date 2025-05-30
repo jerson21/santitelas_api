@@ -1,4 +1,4 @@
-// src/models/Pago.model.ts
+﻿// src/models/Pago.model.ts
 import { 
   Table, 
   Column, 
@@ -53,9 +53,7 @@ export class Pago extends Model {
   })
   fecha_pago!: Date;
 
-  @BelongsTo(() => Venta, 'id_venta')
   venta!: Venta;
 
-  @BelongsTo(() => MetodoPago, 'id_metodo_pago')
   metodoPago!: MetodoPago;
 }
