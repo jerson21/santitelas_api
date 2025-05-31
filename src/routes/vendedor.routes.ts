@@ -61,7 +61,12 @@ router.get('/productos', async (req, res, next) => {
     const whereStock: any = {};
     
     if (categoria) {
-      whereProducto['$categoria.nombre$'] = categoria;
+      // Filtrar por categoría usando el ID en lugar del nombre
+      const catId = Number(categoria);
+      if (!isNaN(catId)) {
+        // campo directo de producto: id_categoria
+        whereProducto.id_categoria = catId;
+      }
     }
     if (tipo) {
       whereProducto.tipo = tipo;

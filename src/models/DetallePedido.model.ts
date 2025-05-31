@@ -1,5 +1,4 @@
-﻿
-// src/models/DetallePedido.model.ts - ACTUALIZACIÃ“N COMPLETA
+﻿// src/models/DetallePedido.model.ts - VERIFICADO PARA NUEVA BD
 import { 
   Table, 
   Column, 
@@ -17,7 +16,13 @@ import { Usuario } from './Usuario.model';
 
 @Table({
   tableName: 'detalle_pedidos',
-  timestamps: false
+  timestamps: false,
+  indexes: [
+    { fields: ['id_pedido'] },
+    { fields: ['id_variante_producto'] },
+    { fields: ['id_modalidad'] },
+    { fields: ['tipo_precio'] }
+  ]
 })
 export class DetallePedido extends Model {
   @PrimaryKey
@@ -32,6 +37,7 @@ export class DetallePedido extends Model {
   })
   id_pedido!: number;
 
+  // ✅ CORRECTO: Necesitamos ambos campos para la nueva estructura
   @ForeignKey(() => VarianteProducto)
   @Column({
     type: DataType.INTEGER,
@@ -92,7 +98,7 @@ export class DetallePedido extends Model {
   })
   fecha_creacion!: Date;
 
-  // RELACIONES ACTUALIZADAS
+  // ✅ RELACIONES CORRECTAS
   pedido!: Pedido;
 
   varianteProducto!: VarianteProducto;
@@ -101,7 +107,7 @@ export class DetallePedido extends Model {
 
   usuarioAutorizador?: Usuario;
 
-  // MÃ‰TODOS ACTUALIZADOS
+  // ✅ MÉTODOS ACTUALIZADOS
   calcularSubtotal(): number {
     return Math.round(this.cantidad * this.precio_unitario);
   }
@@ -127,6 +133,15 @@ export class DetallePedido extends Model {
     return `${producto.getDescripcionCompleta()} - ${this.varianteProducto.getDescripcionCompleta()} - ${this.modalidad.nombre}`;
   }
 
+  getDescripcionCorta(): string {
+    if (!this.varianteProducto || !this.modalidad) return 'Producto no encontrado';
+    
+    const producto = this.varianteProducto.producto;
+    if (!producto) return 'Producto no encontrado';
+    
+    return `${producto.nombre} ${this.varianteProducto.getDescripcionCompleta()}`;
+  }
+
   validarStock(): { valido: boolean; mensaje?: string } {
     if (!this.varianteProducto) {
       return { valido: false, mensaje: 'Variante de producto no encontrada' };
@@ -142,5 +157,106 @@ export class DetallePedido extends Model {
     }
 
     return { valido: true };
+  }
+
+  validarModalidad(): { valido: boolean; mensaje?: string } {
+    if (!this.modalidad) {
+      return { valido: false, mensaje: 'Modalidad no encontrada' };
+    }
+
+    if (!this.modalidad.activa) {
+      return { valido: false, mensaje: 'La modalidad no está activa' };
+    }
+
+    // Validar que la modalidad pertenezca a la variante
+    if (this.modalidad.id_variante_producto !== this.id_variante_producto) {
+      return { 
+        valido: false, 
+        mensaje: 'La modalidad no pertenece a la variante seleccionada' 
+      };
+    }
+
+    // Validar cantidad según modalidad
+    const validacionCantidad = this.modalidad.validarCantidad(this.cantidad);
+    if (!validacionCantidad.valida) {
+      return validacionCantidad;
+    }
+
+    return { valido: true };
+  }
+
+  // ✅ NUEVOS MÉTODOS PARA LA NUEVA ESTRUCTURA
+  validarCompleto(): { valido: boolean; errores: string[] } {
+    const errores: string[] = [];
+
+    // Validar stock
+    const validacionStock = this.validarStock();
+    if (!validacionStock.valido && validacionStock.mensaje) {
+      errores.push(validacionStock.mensaje);
+    }
+
+    // Validar modalidad
+    const validacionModalidad = this.validarModalidad();
+    if (!validacionModalidad.valido && validacionModalidad.mensaje) {
+      errores.push(validacionModalidad.mensaje);
+    }
+
+    // Validar precio personalizado
+    if (this.tipo_precio === 'personalizado' && !this.precio_autorizado_por) {
+      errores.push('Precio personalizado requiere autorización');
+    }
+
+    // Validar cantidad mínima
+    if (this.cantidad <= 0) {
+      errores.push('La cantidad debe ser mayor a 0');
+    }
+
+    // Validar precio unitario
+    if (this.precio_unitario <= 0) {
+      errores.push('El precio unitario debe ser mayor a 0');
+    }
+
+    return {
+      valido: errores.length === 0,
+      errores
+    };
+  }
+
+  getDatosParaVenta(): any {
+    return {
+      id_detalle: this.id_detalle,
+      id_variante_producto: this.id_variante_producto,
+      id_modalidad: this.id_modalidad,
+      cantidad: this.cantidad,
+      precio_unitario: this.precio_unitario,
+      subtotal: this.subtotal,
+      tipo_precio: this.tipo_precio,
+      descripcion: this.getDescripcionCompleta(),
+      descripcion_corta: this.getDescripcionCorta(),
+      sku: this.varianteProducto?.sku,
+      modalidad_nombre: this.modalidad?.nombre,
+      observaciones: this.observaciones
+    };
+  }
+
+  // ✅ MÉTODOS ESTÁTICOS ÚTILES
+  static async crearDetalle(datos: {
+    id_pedido: number;
+    id_variante_producto: number;
+    id_modalidad: number;
+    cantidad: number;
+    precio_unitario: number;
+    tipo_precio?: 'neto' | 'factura' | 'personalizado';
+    observaciones?: string;
+    precio_autorizado_por?: number;
+    motivo_precio_personalizado?: string;
+  }): Promise<DetallePedido> {
+    const subtotal = Math.round(datos.cantidad * datos.precio_unitario);
+    
+    return await DetallePedido.create({
+      ...datos,
+      subtotal,
+      tipo_precio: datos.tipo_precio || 'neto'
+    });
   }
 }

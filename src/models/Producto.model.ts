@@ -1,4 +1,4 @@
-﻿// src/models/Producto.model.ts - VERSIÃ“N CORREGIDA CON MODALIDADES
+﻿// src/models/Producto.model.ts - VERSIÓN CORREGIDA PARA NUEVA BD
 import { 
   Table, 
   Column, 
@@ -13,7 +13,6 @@ import {
 } from 'sequelize-typescript';
 import { Categoria } from './Categoria.model';
 import { VarianteProducto } from './VarianteProducto.model';
-import { ModalidadProducto } from './ModalidadProducto.model'; // âœ… AGREGAR IMPORT
 
 @Table({
   tableName: 'productos',
@@ -73,6 +72,25 @@ export class Producto extends Model {
   })
   unidad_medida!: string;
 
+  // ✅ NUEVOS CAMPOS PARA PLANTILLAS DE PRECIOS
+  @Column({ 
+    type: DataType.DECIMAL(10, 0), 
+    defaultValue: 0 
+  })
+  precio_costo_base!: number;
+
+  @Column({ 
+    type: DataType.DECIMAL(10, 0), 
+    defaultValue: 0 
+  })
+  precio_neto_base!: number;
+
+  @Column({ 
+    type: DataType.DECIMAL(10, 0), 
+    defaultValue: 0 
+  })
+  precio_neto_factura_base!: number;
+
   @Column({ 
     type: DataType.BOOLEAN, 
     defaultValue: true 
@@ -91,29 +109,14 @@ export class Producto extends Model {
   })
   fecha_actualizacion!: Date;
 
-  @Column({ 
-  type: DataType.DECIMAL(12, 2), 
-  allowNull: false,
-  defaultValue: 0
-})
-precio_costo!: number;
-
-  // âœ… RELACIONES CORREGIDAS
+  // ✅ RELACIONES CORREGIDAS
   categoria!: Categoria;
 
   variantes!: VarianteProducto[];
 
-  // âœ… AGREGAR RELACIÃ“N CON MODALIDADES
-  modalidades!: ModalidadProducto[];
-
-  // âœ… MÃ‰TODOS CORREGIDOS
+  // ✅ MÉTODOS CORREGIDOS
   getVariantesActivas(): VarianteProducto[] {
     return this.variantes?.filter(v => v.activo) || [];
-  }
-
-  // âœ… NUEVO: Obtener modalidades activas
-  getModalidadesActivas(): ModalidadProducto[] {
-    return this.modalidades?.filter(m => m.activa) || [];
   }
 
   calcularStockTotal(): number {
@@ -124,18 +127,18 @@ precio_costo!: number;
     }, 0);
   }
 
-  // âœ… CORREGIDO: Obtener rangos de precios desde modalidades del producto
+  // ✅ CORREGIDO: Obtener rangos de precios desde modalidades de las variantes
   getRangoPrecios(tipoDocumento: 'ticket' | 'boleta' | 'factura' = 'ticket'): { minimo: number; maximo: number } {
-    const modalidades = this.getModalidadesActivas();
-    
-    if (modalidades.length === 0) {
-      return { minimo: 0, maximo: 0 };
-    }
-
     const precios: number[] = [];
     
-    modalidades.forEach(modalidad => {
-      precios.push(modalidad.obtenerPrecioPorTipoDocumento(tipoDocumento));
+    this.getVariantesActivas().forEach(variante => {
+      if (variante.modalidades) {
+        variante.modalidades.forEach(modalidad => {
+          if (modalidad.activa) {
+            precios.push(modalidad.obtenerPrecioPorTipoDocumento(tipoDocumento));
+          }
+        });
+      }
     });
 
     if (precios.length === 0) {
@@ -195,7 +198,7 @@ precio_costo!: number;
     }) || null;
   }
 
-  // âœ… CORREGIDO: Usar modalidades del producto
+  // ✅ CORREGIDO: Calcular estadísticas desde variantes y sus modalidades
   getEstadisticas(): {
     total_variantes: number;
     total_modalidades: number;
@@ -207,23 +210,28 @@ precio_costo!: number;
     materiales_disponibles: string[];
   } {
     const variantes = this.getVariantesActivas();
-    const modalidades = this.getModalidadesActivas();
     
     const colores = new Set<string>();
     const medidas = new Set<string>();
     const materiales = new Set<string>();
+    let totalModalidades = 0;
 
     variantes.forEach(variante => {
       if (variante.color) colores.add(variante.color);
       if (variante.medida) medidas.add(variante.medida);
       if (variante.material) materiales.add(variante.material);
+      
+      // Contar modalidades activas de esta variante
+      if (variante.modalidades) {
+        totalModalidades += variante.modalidades.filter(m => m.activa).length;
+      }
     });
 
     const precios = this.getRangoPrecios();
 
     return {
       total_variantes: variantes.length,
-      total_modalidades: modalidades.length,
+      total_modalidades: totalModalidades,
       stock_total: this.calcularStockTotal(),
       precio_minimo: precios.minimo,
       precio_maximo: precios.maximo,
@@ -231,5 +239,60 @@ precio_costo!: number;
       medidas_disponibles: Array.from(medidas).sort(),
       materiales_disponibles: Array.from(materiales).sort()
     };
+  }
+
+  // ✅ NUEVOS MÉTODOS PARA PLANTILLAS DE PRECIOS
+  getPlantillaPrecios(): {
+    precio_costo_base: number;
+    precio_neto_base: number;
+    precio_neto_factura_base: number;
+  } {
+    return {
+      precio_costo_base: Number(this.precio_costo_base),
+      precio_neto_base: Number(this.precio_neto_base),
+      precio_neto_factura_base: Number(this.precio_neto_factura_base)
+    };
+  }
+
+  actualizarPlantillaPrecios(precios: {
+    precio_costo_base?: number;
+    precio_neto_base?: number;
+    precio_neto_factura_base?: number;
+  }): void {
+    if (precios.precio_costo_base !== undefined) {
+      this.precio_costo_base = precios.precio_costo_base;
+    }
+    if (precios.precio_neto_base !== undefined) {
+      this.precio_neto_base = precios.precio_neto_base;
+    }
+    if (precios.precio_neto_factura_base !== undefined) {
+      this.precio_neto_factura_base = precios.precio_neto_factura_base;
+    }
+  }
+
+  // ✅ MÉTODO PARA OBTENER TODAS LAS MODALIDADES DEL PRODUCTO
+  getAllModalidades(): any[] {
+    const modalidades: any[] = [];
+    
+    this.getVariantesActivas().forEach(variante => {
+      if (variante.modalidades) {
+        variante.modalidades.forEach(modalidad => {
+          if (modalidad.activa) {
+            modalidades.push({
+              ...modalidad.toJSON(),
+              variante: {
+                id_variante_producto: variante.id_variante_producto,
+                sku: variante.sku,
+                color: variante.color,
+                medida: variante.medida,
+                material: variante.material
+              }
+            });
+          }
+        });
+      }
+    });
+
+    return modalidades;
   }
 }

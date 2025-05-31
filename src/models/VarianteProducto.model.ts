@@ -1,4 +1,4 @@
-﻿// src/models/VarianteProducto.model.ts - VERSIÃ“N CORREGIDA
+﻿// src/models/VarianteProducto.model.ts - VERSIÓN CORREGIDA PARA NUEVA BD
 import { 
   Table, 
   Column, 
@@ -13,6 +13,7 @@ import {
 import { Producto } from './Producto.model';
 import { StockPorBodega } from './StockPorBodega.model';
 import { MovimientoStock } from './MovimientoStock.model';
+import { ModalidadProducto } from './ModalidadProducto.model';
 
 @Table({
   tableName: 'variantes_producto',
@@ -89,17 +90,17 @@ export class VarianteProducto extends Model {
   })
   fecha_actualizacion!: Date;
 
-  // âœ… RELACIONES CORREGIDAS
+  // ✅ RELACIONES CORREGIDAS
   producto!: Producto;
-
-  // âœ… ELIMINAR MODALIDADES - Van a nivel de producto
-  // Las modalidades NO van aquÃ­, van en Producto
 
   stockPorBodega!: StockPorBodega[];
 
   movimientos!: MovimientoStock[];
 
-  // âœ… MÃ‰TODOS CORREGIDOS
+  // ✅ NUEVA RELACIÓN: Modalidades por variante específica
+  modalidades!: ModalidadProducto[];
+
+  // ✅ MÉTODOS CORREGIDOS
   calcularStockTotal(): number {
     return this.stockPorBodega?.reduce((total, stock) => total + stock.cantidad_disponible, 0) || 0;
   }
@@ -111,7 +112,7 @@ export class VarianteProducto extends Model {
     if (this.medida) partes.push(`Med. ${this.medida}`);
     if (this.material) partes.push(this.material);
     
-    return partes.length > 0 ? partes.join(' - ') : 'EstÃ¡ndar';
+    return partes.length > 0 ? partes.join(' - ') : 'Estándar';
   }
 
   tieneStock(cantidad: number = 1): boolean {
@@ -133,5 +134,111 @@ export class VarianteProducto extends Model {
     if (filtros.material && this.material !== filtros.material) return false;
     
     return true;
+  }
+
+  // ✅ NUEVOS MÉTODOS PARA MODALIDADES
+  getModalidadesActivas(): ModalidadProducto[] {
+    return this.modalidades?.filter(m => m.activa) || [];
+  }
+
+  buscarModalidad(nombre: string): ModalidadProducto | null {
+    const modalidades = this.getModalidadesActivas();
+    return modalidades.find(m => m.nombre.toLowerCase() === nombre.toLowerCase()) || null;
+  }
+
+  getModalidadPorDefecto(): ModalidadProducto | null {
+    const modalidades = this.getModalidadesActivas();
+    if (modalidades.length === 0) return null;
+    
+    // Prioridad: METRO > UNIDAD > primera disponible
+    const porPrioridad = modalidades.find(m => 
+      m.nombre.toLowerCase().includes('metro') || 
+      m.nombre.toLowerCase().includes('unidad')
+    );
+    
+    return porPrioridad || modalidades[0];
+  }
+
+  getRangoPrecios(tipoDocumento: 'ticket' | 'boleta' | 'factura' = 'ticket'): { minimo: number; maximo: number } {
+    const modalidades = this.getModalidadesActivas();
+    
+    if (modalidades.length === 0) {
+      return { minimo: 0, maximo: 0 };
+    }
+
+    const precios = modalidades.map(m => m.obtenerPrecioPorTipoDocumento(tipoDocumento));
+    
+    return {
+      minimo: Math.min(...precios),
+      maximo: Math.max(...precios)
+    };
+  }
+
+  // ✅ MÉTODO PARA OBTENER DATOS COMPLETOS PARA EL FRONTEND
+  getDatosCompletos(): any {
+    return {
+      id_variante_producto: this.id_variante_producto,
+      id_producto: this.id_producto,
+      sku: this.sku,
+      color: this.color,
+      medida: this.medida,
+      material: this.material,
+      descripcion: this.descripcion,
+      descripcion_completa: this.getDescripcionCompleta(),
+      stock_total: this.calcularStockTotal(),
+      tiene_stock: this.tieneStock(),
+      modalidades_disponibles: this.getModalidadesActivas().map(modalidad => ({
+        id_modalidad: modalidad.id_modalidad,
+        nombre: modalidad.nombre,
+        descripcion: modalidad.descripcion,
+        cantidad_base: modalidad.cantidad_base,
+        es_cantidad_variable: modalidad.es_cantidad_variable,
+        minimo_cantidad: modalidad.minimo_cantidad,
+        precio_costo: modalidad.precio_costo,
+        precio_neto: modalidad.precio_neto,
+        precio_neto_factura: modalidad.precio_neto_factura,
+        precio_con_iva: modalidad.precio_con_iva
+      })),
+      rango_precios: this.getRangoPrecios()
+    };
+  }
+
+  // ✅ MÉTODOS DE VALIDACIÓN
+  validarModalidadCompatible(modalidad: ModalidadProducto): { valida: boolean; mensaje?: string } {
+    if (modalidad.id_variante_producto !== this.id_variante_producto) {
+      return {
+        valida: false,
+        mensaje: 'La modalidad no pertenece a esta variante'
+      };
+    }
+
+    if (!modalidad.activa) {
+      return {
+        valida: false,
+        mensaje: 'La modalidad no está activa'
+      };
+    }
+
+    return { valida: true };
+  }
+
+  // ✅ MÉTODO PARA OBTENER EL ATRIBUTO PRINCIPAL DE LA VARIANTE
+  getAtributoPrincipal(): { tipo: 'color' | 'medida' | 'material' | 'ninguno'; valor: string } {
+    if (this.color) return { tipo: 'color', valor: this.color };
+    if (this.medida) return { tipo: 'medida', valor: this.medida };
+    if (this.material) return { tipo: 'material', valor: this.material };
+    return { tipo: 'ninguno', valor: 'Estándar' };
+  }
+
+  // ✅ MÉTODO PARA COMPARAR CON OTRA VARIANTE
+  esIgualA(otraVariante: VarianteProducto): boolean {
+    return this.id_variante_producto === otraVariante.id_variante_producto;
+  }
+
+  esSimilarA(otraVariante: VarianteProducto): boolean {
+    return this.id_producto === otraVariante.id_producto &&
+           this.color === otraVariante.color &&
+           this.medida === otraVariante.medida &&
+           this.material === otraVariante.material;
   }
 }

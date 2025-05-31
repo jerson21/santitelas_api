@@ -1,4 +1,4 @@
-﻿// src/models/ModalidadProducto.model.ts - VERSIÃ“N CORREGIDA
+﻿// src/models/ModalidadProducto.model.ts - VERSIÓN CORREGIDA PARA NUEVA BD
 import { 
   Table, 
   Column, 
@@ -10,7 +10,7 @@ import {
   ForeignKey,
   Index
 } from 'sequelize-typescript';
-import { Producto } from './Producto.model';
+import { VarianteProducto } from './VarianteProducto.model';
 
 @Table({
   tableName: 'modalidades_producto',
@@ -18,7 +18,7 @@ import { Producto } from './Producto.model';
   indexes: [
     { fields: ['activa'] },
     { fields: ['precio_neto'] },
-    { fields: ['id_producto', 'nombre'], unique: true }
+    { fields: ['id_variante_producto', 'nombre'], unique: true }
   ]
 })
 export class ModalidadProducto extends Model {
@@ -27,19 +27,19 @@ export class ModalidadProducto extends Model {
   @Column(DataType.INTEGER)
   id_modalidad!: number;
 
-  // âœ… CORRECCIÃ“N: Las modalidades van a nivel de PRODUCTO, no variante
-  @ForeignKey(() => Producto)
+  // ✅ CAMBIO CRÍTICO: Ahora apunta a variante específica
+  @ForeignKey(() => VarianteProducto)
   @Column({
     type: DataType.INTEGER,
     allowNull: false
   })
-  id_producto!: number;
+  id_variante_producto!: number;
 
   @Column({
     type: DataType.STRING(50),
     allowNull: false
   })
-  nombre!: string; // "Por metro", "Rollo", "Embalaje"
+  nombre!: string; // "METRO", "ROLLO", "UNIDAD", "EMBALAJE"
 
   @Column({
     type: DataType.STRING(100),
@@ -107,17 +107,17 @@ export class ModalidadProducto extends Model {
   })
   fecha_actualizacion!: Date;
 
-  // âœ… RELACIÃ“N CORREGIDA: Con Producto
-  producto!: Producto;
+  // ✅ RELACIÓN CORREGIDA: Con VarianteProducto
+  varianteProducto!: VarianteProducto;
 
-  // âœ… MÃ‰TODOS CORREGIDOS
+  // ✅ MÉTODOS ACTUALIZADOS
   obtenerPrecioPorTipoDocumento(tipoDocumento: 'ticket' | 'boleta' | 'factura'): number {
     switch (tipoDocumento) {
       case 'ticket':
       case 'boleta':
         return Number(this.precio_neto);
       case 'factura':
-        return this.precio_con_iva;
+        return Number(this.precio_neto_factura);
       default:
         return Number(this.precio_neto);
     }
@@ -127,17 +127,48 @@ export class ModalidadProducto extends Model {
     if (cantidad <= 0) {
       return { valida: false, mensaje: 'La cantidad debe ser mayor a 0' };
     }
+    
     if (this.minimo_cantidad > 0 && cantidad < this.minimo_cantidad) {
       return { 
         valida: false, 
-        mensaje: `Cantidad mÃ­nima requerida: ${this.minimo_cantidad}` 
+        mensaje: `Cantidad mínima requerida: ${this.minimo_cantidad}` 
       };
     }
+    
+    // Validar decimales según es_cantidad_variable
+    if (!this.es_cantidad_variable && cantidad % 1 !== 0) {
+      return {
+        valida: false,
+        mensaje: 'Esta modalidad requiere cantidades enteras'
+      };
+    }
+    
     return { valida: true };
   }
 
   calcularSubtotal(cantidad: number, tipoDocumento: 'ticket' | 'boleta' | 'factura' = 'ticket'): number {
     const precio = this.obtenerPrecioPorTipoDocumento(tipoDocumento);
     return Math.round(Number(cantidad) * precio);
+  }
+
+  getDescripcionCompleta(): string {
+    if (this.descripcion) {
+      return `${this.nombre} - ${this.descripcion}`;
+    }
+    return this.nombre;
+  }
+
+  esParaMetros(): boolean {
+    return this.nombre.toLowerCase().includes('metro');
+  }
+
+  esParaRollos(): boolean {
+    return this.nombre.toLowerCase().includes('rollo');
+  }
+
+  esParaEmbalajes(): boolean {
+    return this.nombre.toLowerCase().includes('embalaje') || 
+           this.nombre.toLowerCase().includes('pack') ||
+           this.nombre.toLowerCase().includes('set');
   }
 }

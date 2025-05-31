@@ -1,11 +1,57 @@
 -- ==========================================================
 -- SANTITELAS - SISTEMA DE PUNTO DE VENTA
 -- Base de datos completa organizada y optimizada
--- VERSIÓN ACTUALIZADA CON CAMPO TIPO
+-- VERSIÓN ACTUALIZADA: MODALIDADES POR VARIANTE
 -- ==========================================================
 
 CREATE DATABASE IF NOT EXISTS santitelas;
 USE santitelas;
+
+-- ==========================================================
+-- LIMPIEZA INICIAL (para evitar conflictos en recompilaciones)
+-- ==========================================================
+
+-- Deshabilitar foreign key checks temporalmente
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- Limpiar datos existentes (solo si existen las tablas)
+DROP TABLE IF EXISTS pagos;
+DROP TABLE IF EXISTS ventas;
+DROP TABLE IF EXISTS arqueos_caja;
+DROP TABLE IF EXISTS turnos_caja;
+DROP TABLE IF EXISTS detalle_pedidos;
+DROP TABLE IF EXISTS pedidos;
+DROP TABLE IF EXISTS movimientos_stock;
+DROP TABLE IF EXISTS stock_por_bodega;
+DROP TABLE IF EXISTS modalidades_producto;
+DROP TABLE IF EXISTS variantes_producto;
+DROP TABLE IF EXISTS productos;
+DROP TABLE IF EXISTS clientes;
+DROP TABLE IF EXISTS cajas;
+DROP TABLE IF EXISTS metodos_pago;
+DROP TABLE IF EXISTS bodegas;
+DROP TABLE IF EXISTS tipos_documento;
+DROP TABLE IF EXISTS categorias;
+DROP TABLE IF EXISTS usuarios;
+DROP TABLE IF EXISTS roles;
+
+-- Limpiar funciones y procedures existentes
+DROP PROCEDURE IF EXISTS crear_modalidades_para_variante;
+DROP FUNCTION IF EXISTS obtener_precio_modalidad;
+DROP FUNCTION IF EXISTS calcular_stock_total_variante;
+DROP FUNCTION IF EXISTS obtener_stock_en_bodega;
+DROP FUNCTION IF EXISTS generar_numero_pedido;
+DROP FUNCTION IF EXISTS generar_numero_venta;
+
+-- Limpiar vistas existentes
+DROP VIEW IF EXISTS vista_productos_completa;
+DROP VIEW IF EXISTS vista_detalle_pedidos_completa;
+DROP VIEW IF EXISTS vista_clientes_datos_pendientes;
+DROP VIEW IF EXISTS vista_stock_productos;
+DROP VIEW IF EXISTS vista_productos_por_tipo;
+
+-- Rehabilitar foreign key checks
+SET FOREIGN_KEY_CHECKS = 1;
 
 -- ==========================================================
 -- 1. TABLAS DE CONFIGURACIÓN Y MAESTROS
@@ -109,26 +155,32 @@ CREATE TABLE cajas (
 );
 
 -- ==========================================================
--- 2. GESTIÓN DE PRODUCTOS - ACTUALIZADA CON CAMPO TIPO
+-- 2. GESTIÓN DE PRODUCTOS - NUEVA ESTRUCTURA
 -- ==========================================================
 
--- Productos base
+-- Productos base (PLANTILLAS DE PRECIOS)
 CREATE TABLE productos (
     id_producto INT PRIMARY KEY AUTO_INCREMENT,
     codigo VARCHAR(50) UNIQUE NOT NULL,
     nombre VARCHAR(100) NOT NULL,
     descripcion TEXT,
     id_categoria INT NOT NULL,
-    tipo VARCHAR(50) NULL,                      -- NUEVO: LINO, FELPA, ECO CUERO, etc.
+    tipo VARCHAR(50) NULL,                      -- LINO, FELPA, ECO CUERO, etc.
     stock_minimo_total DECIMAL(10,2) DEFAULT 0,
     unidad_medida ENUM('metro', 'unidad', 'kilogramo', 'litros') DEFAULT 'unidad',
+    
+    -- PLANTILLA DE PRECIOS (para heredar a variantes)
+    precio_costo_base DECIMAL(10,0) DEFAULT 0,
+    precio_neto_base DECIMAL(10,0) DEFAULT 0,
+    precio_neto_factura_base DECIMAL(10,0) DEFAULT 0,
+    
     activo BOOLEAN DEFAULT TRUE,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     FOREIGN KEY (id_categoria) REFERENCES categorias(id_categoria),
     INDEX idx_categoria (id_categoria),
-    INDEX idx_tipo (tipo),                      -- NUEVO ÍNDICE
+    INDEX idx_tipo (tipo),
     INDEX idx_codigo (codigo),
     INDEX idx_activo (activo),
     INDEX idx_nombre (nombre)
@@ -156,20 +208,20 @@ CREATE TABLE variantes_producto (
     INDEX idx_activo (activo)
 );
 
--- Modalidades de venta (por metro, por rollo, sets, etc.)
+-- NUEVA ESTRUCTURA: Modalidades por VARIANTE específica
 CREATE TABLE modalidades_producto (
     id_modalidad INT PRIMARY KEY AUTO_INCREMENT,
-    id_producto INT NOT NULL,
-    nombre VARCHAR(50) NOT NULL,                    -- "Por metro", "Set de 4", "Embalaje 30"
-    descripcion VARCHAR(100),                       -- "4 patas juego completo"
-    cantidad_base DECIMAL(10,2) NOT NULL,           -- 1, 4, 30
-    es_cantidad_variable BOOLEAN DEFAULT FALSE,     -- TRUE para metros/rollos variables
-    minimo_cantidad DECIMAL(10,2) DEFAULT 0,        -- Para rollos mínimo 30m
+    id_variante_producto INT NOT NULL,          -- CAMBIO: Ahora apunta a variante específica
+    nombre VARCHAR(50) NOT NULL,                -- "METRO", "ROLLO", "UNIDAD", "EMBALAJE"
+    descripcion VARCHAR(100),                   -- "Venta al corte por metro"
+    cantidad_base DECIMAL(10,2) NOT NULL,       -- 1, 4, 30
+    es_cantidad_variable BOOLEAN DEFAULT FALSE, -- TRUE para metros/rollos variables
+    minimo_cantidad DECIMAL(10,2) DEFAULT 0,    -- Para rollos mínimo 30m
     
-    -- Precios (en pesos chilenos CLP)
-    precio_costo DECIMAL(10,0) DEFAULT 0,           -- Costo interno
-    precio_neto DECIMAL(10,0) NOT NULL,             -- Precio para tickets/comunicación interna
-    precio_neto_factura DECIMAL(10,0) NOT NULL,     -- Precio que aparece en factura (puede ser menor)
+    -- Precios específicos por variante (en pesos chilenos CLP)
+    precio_costo DECIMAL(10,0) DEFAULT 0,
+    precio_neto DECIMAL(10,0) NOT NULL,
+    precio_neto_factura DECIMAL(10,0) NOT NULL,
     
     -- Precio final calculado (con IVA sobre precio_neto_factura)
     precio_con_iva DECIMAL(10,0) GENERATED ALWAYS AS (ROUND(precio_neto_factura * 1.19, 0)) STORED,
@@ -178,14 +230,14 @@ CREATE TABLE modalidades_producto (
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
-    FOREIGN KEY (id_producto) REFERENCES productos(id_producto) ON DELETE CASCADE,
+    -- CAMBIO: Foreign key a variante específica
+    FOREIGN KEY (id_variante_producto) REFERENCES variantes_producto(id_variante_producto) ON DELETE CASCADE,
     
     -- Índices
-    INDEX idx_producto (id_producto),
+    INDEX idx_variante_producto (id_variante_producto),
     INDEX idx_activa (activa),
     INDEX idx_precio_neto (precio_neto),
-    UNIQUE KEY unique_producto_modalidad(id_producto, nombre)
-
+    UNIQUE KEY unique_variante_modalidad(id_variante_producto, nombre)
 );
 
 -- Control de stock por bodega
@@ -252,7 +304,7 @@ CREATE TABLE clientes (
     
     -- Control
     activo BOOLEAN DEFAULT TRUE,
-    datos_completos BOOLEAN DEFAULT FALSE,  -- Para saber si faltan datos
+    datos_completos BOOLEAN DEFAULT FALSE,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
@@ -475,10 +527,63 @@ CREATE TABLE pagos (
 );
 
 -- ==========================================================
--- 7. FUNCIONES ÚTILES
+-- 7. FUNCIONES ÚTILES ACTUALIZADAS
 -- ==========================================================
 
 DELIMITER //
+
+-- Función: Crear modalidades automáticamente para nueva variante (MEJORADA)
+CREATE PROCEDURE crear_modalidades_para_variante(
+    IN p_id_variante_producto INT
+)
+BEGIN
+    DECLARE v_id_producto INT;
+    DECLARE v_precio_costo_base DECIMAL(10,0);
+    DECLARE v_precio_neto_base DECIMAL(10,0);
+    DECLARE v_precio_neto_factura_base DECIMAL(10,0);
+    DECLARE v_unidad_medida VARCHAR(20);
+    DECLARE v_count INT DEFAULT 0;
+    
+    -- Verificar si ya existen modalidades para esta variante
+    SELECT COUNT(*) INTO v_count
+    FROM modalidades_producto 
+    WHERE id_variante_producto = p_id_variante_producto;
+    
+    -- Solo crear si no existen modalidades
+    IF v_count = 0 THEN
+        -- Obtener datos del producto padre
+        SELECT p.id_producto, 
+               COALESCE(p.precio_costo_base, 0), 
+               COALESCE(p.precio_neto_base, 0), 
+               COALESCE(p.precio_neto_factura_base, 0), 
+               COALESCE(p.unidad_medida, 'unidad')
+        INTO v_id_producto, v_precio_costo_base, v_precio_neto_base, v_precio_neto_factura_base, v_unidad_medida
+        FROM productos p
+        JOIN variantes_producto vp ON p.id_producto = vp.id_producto
+        WHERE vp.id_variante_producto = p_id_variante_producto;
+        
+        -- Crear modalidades según la unidad de medida
+        IF v_unidad_medida = 'metro' THEN
+            -- Para telas: METRO y ROLLO
+            INSERT IGNORE INTO modalidades_producto (id_variante_producto, nombre, descripcion, cantidad_base, es_cantidad_variable, minimo_cantidad, precio_costo, precio_neto, precio_neto_factura)
+            VALUES 
+                (p_id_variante_producto, 'METRO', 'Venta al corte por metro', 1, TRUE, 0.1, v_precio_costo_base, v_precio_neto_base, v_precio_neto_factura_base),
+                (p_id_variante_producto, 'ROLLO', 'Rollo completo', 25, FALSE, 25, ROUND(v_precio_costo_base * 0.9), ROUND(v_precio_neto_base * 0.9), ROUND(v_precio_neto_factura_base * 0.9));
+        
+        ELSEIF v_unidad_medida = 'unidad' THEN
+            -- Para productos unitarios: UNIDAD y EMBALAJE/SET
+            INSERT IGNORE INTO modalidades_producto (id_variante_producto, nombre, descripcion, cantidad_base, es_cantidad_variable, minimo_cantidad, precio_costo, precio_neto, precio_neto_factura)
+            VALUES 
+                (p_id_variante_producto, 'UNIDAD', 'Venta por unidad', 1, FALSE, 1, v_precio_costo_base, v_precio_neto_base, v_precio_neto_factura_base),
+                (p_id_variante_producto, 'EMBALAJE', 'Embalaje completo', 10, FALSE, 10, ROUND(v_precio_costo_base * 0.85), ROUND(v_precio_neto_base * 0.85), ROUND(v_precio_neto_factura_base * 0.85));
+        
+        ELSE
+            -- Por defecto: solo UNIDAD
+            INSERT IGNORE INTO modalidades_producto (id_variante_producto, nombre, descripcion, cantidad_base, es_cantidad_variable, minimo_cantidad, precio_costo, precio_neto, precio_neto_factura)
+            VALUES (p_id_variante_producto, 'UNIDAD', 'Venta por unidad', 1, FALSE, 1, v_precio_costo_base, v_precio_neto_base, v_precio_neto_factura_base);
+        END IF;
+    END IF;
+END//
 
 -- Función: Obtener precio según modalidad y tipo de documento
 CREATE FUNCTION obtener_precio_modalidad(
@@ -491,7 +596,6 @@ DETERMINISTIC
 BEGIN
     DECLARE v_precio DECIMAL(10,0) DEFAULT 0;
     
-    -- Solo aplica para precios estándar, no personalizado
     IF p_tipo_precio != 'personalizado' THEN
         SELECT 
             CASE p_tipo_precio
@@ -522,25 +626,6 @@ BEGIN
     RETURN v_stock_total;
 END//
 
--- Función: Obtener stock en bodega específica
-CREATE FUNCTION obtener_stock_en_bodega(
-    p_id_variante_producto INT,
-    p_id_bodega INT
-)
-RETURNS DECIMAL(10,2)
-READS SQL DATA
-DETERMINISTIC
-BEGIN
-    DECLARE v_stock DECIMAL(10,2) DEFAULT 0;
-    
-    SELECT COALESCE(cantidad_disponible, 0) INTO v_stock
-    FROM stock_por_bodega 
-    WHERE id_variante_producto = p_id_variante_producto 
-    AND id_bodega = p_id_bodega;
-    
-    RETURN v_stock;
-END//
-
 -- Función: Generar número de pedido automático
 CREATE FUNCTION generar_numero_pedido() 
 RETURNS VARCHAR(20)
@@ -561,6 +646,25 @@ BEGIN
     SET v_numero_completo = CONCAT(v_fecha, '-', LPAD(v_numero, 4, '0'));
     
     RETURN v_numero_completo;
+END//
+
+-- Función: Obtener stock en bodega específica
+CREATE FUNCTION obtener_stock_en_bodega(
+    p_id_variante_producto INT,
+    p_id_bodega INT
+)
+RETURNS DECIMAL(10,2)
+READS SQL DATA
+DETERMINISTIC
+BEGIN
+    DECLARE v_stock DECIMAL(10,2) DEFAULT 0;
+    
+    SELECT COALESCE(cantidad_disponible, 0) INTO v_stock
+    FROM stock_por_bodega 
+    WHERE id_variante_producto = p_id_variante_producto 
+    AND id_bodega = p_id_bodega;
+    
+    RETURN v_stock;
 END//
 
 -- Función: Generar número de venta automático
@@ -588,10 +692,21 @@ END//
 DELIMITER ;
 
 -- ==========================================================
--- 8. TRIGGERS DE VALIDACIÓN Y CÁLCULO
+-- 8. TRIGGERS ACTUALIZADOS
 -- ==========================================================
 
 DELIMITER //
+
+-- Trigger: Crear modalidades automáticamente al crear variante (CON VALIDACIONES)
+CREATE TRIGGER tr_crear_modalidades_variante
+    AFTER INSERT ON variantes_producto
+    FOR EACH ROW
+BEGIN
+    -- Solo crear modalidades si no existen ya
+    IF (SELECT COUNT(*) FROM modalidades_producto WHERE id_variante_producto = NEW.id_variante_producto) = 0 THEN
+        CALL crear_modalidades_para_variante(NEW.id_variante_producto);
+    END IF;
+END//
 
 -- Trigger: Validar modalidad-variante y calcular subtotal
 CREATE TRIGGER tr_detalle_pedidos_validacion
@@ -654,6 +769,38 @@ BEGIN
     WHERE id_pedido = NEW.id_pedido;
 END//
 
+-- Trigger: Actualizar totales del pedido cuando se actualiza detalle
+CREATE TRIGGER actualizar_totales_pedido_update
+    AFTER UPDATE ON detalle_pedidos
+    FOR EACH ROW
+BEGIN
+    UPDATE pedidos 
+    SET subtotal = (
+        SELECT COALESCE(SUM(subtotal), 0) 
+        FROM detalle_pedidos 
+        WHERE id_pedido = NEW.id_pedido
+    ),
+    total = subtotal - descuento,
+    fecha_actualizacion = NOW()
+    WHERE id_pedido = NEW.id_pedido;
+END//
+
+-- Trigger: Actualizar totales del pedido cuando se elimina detalle
+CREATE TRIGGER actualizar_totales_pedido_delete
+    AFTER DELETE ON detalle_pedidos
+    FOR EACH ROW
+BEGIN
+    UPDATE pedidos 
+    SET subtotal = (
+        SELECT COALESCE(SUM(subtotal), 0) 
+        FROM detalle_pedidos 
+        WHERE id_pedido = OLD.id_pedido
+    ),
+    total = subtotal - descuento,
+    fecha_actualizacion = NOW()
+    WHERE id_pedido = OLD.id_pedido;
+END//
+
 -- Trigger: Actualizar totales del turno cuando se crea una venta
 CREATE TRIGGER actualizar_totales_turno_venta
     AFTER INSERT ON ventas
@@ -688,16 +835,16 @@ END//
 DELIMITER ;
 
 -- ==========================================================
--- 9. VISTAS ÚTILES ACTUALIZADAS
+-- 9. VISTAS ACTUALIZADAS
 -- ==========================================================
 
--- Vista productos completa con TIPO incluido
+-- Vista productos completa con modalidades por variante
 CREATE VIEW vista_productos_completa AS
 SELECT 
     p.id_producto,
     p.codigo,
     p.nombre as producto_nombre,
-    p.tipo as producto_tipo,                    -- NUEVO
+    p.tipo as producto_tipo,
     p.descripcion as producto_descripcion,
     p.unidad_medida,
     c.nombre as categoria_nombre,
@@ -720,7 +867,7 @@ SELECT
     mp.precio_neto_factura,
     mp.precio_con_iva,
     
-    -- Descripción completa para mostrar
+    -- Descripción completa
     CASE 
         WHEN p.tipo IS NOT NULL THEN 
             CONCAT(p.tipo, ' ', p.nombre, 
@@ -787,7 +934,7 @@ SELECT
     pr.id_producto,
     pr.codigo as producto_codigo,
     pr.nombre as producto_nombre,
-    pr.tipo as producto_tipo,                   -- NUEVO
+    pr.tipo as producto_tipo,
     pr.descripcion as producto_descripcion,
     pr.unidad_medida,
     
@@ -830,13 +977,13 @@ WHERE p.estado = 'pagado_datos_pendientes'
 GROUP BY c.id_cliente
 ORDER BY primera_factura_pendiente ASC;
 
--- Vista stock por productos ACTUALIZADA
+-- Vista stock por productos
 CREATE VIEW vista_stock_productos AS
 SELECT 
     p.id_producto,
     p.codigo,
     p.nombre as producto_nombre,
-    p.tipo as producto_tipo,                    -- NUEVO
+    p.tipo as producto_tipo,
     vp.id_variante_producto,
     vp.sku,
     vp.color,
@@ -875,7 +1022,7 @@ JOIN bodegas b ON spb.id_bodega = b.id_bodega
 WHERE p.activo = TRUE AND vp.activo = TRUE AND b.activa = TRUE
 ORDER BY p.tipo, p.nombre, vp.color, vp.medida, b.nombre;
 
--- NUEVA VISTA: Productos organizados por tipo
+-- Vista productos organizados por tipo
 CREATE VIEW vista_productos_por_tipo AS
 SELECT 
     c.nombre AS categoria,
@@ -896,7 +1043,7 @@ GROUP BY c.nombre, p.tipo, p.nombre
 ORDER BY c.nombre, p.tipo, p.nombre;
 
 -- ==========================================================
--- 10. DATOS INICIALES ACTUALIZADOS
+-- 10. DATOS INICIALES
 -- ==========================================================
 
 -- Roles del sistema
@@ -945,119 +1092,53 @@ INSERT INTO cajas (nombre, ubicacion, activa) VALUES
 ('Caja Secundaria', 'Mostrador Auxiliar', TRUE);
 
 -- ==========================================================
--- PRODUCTOS DE EJEMPLO ACTUALIZADOS
+-- PRODUCTOS DE EJEMPLO CON NUEVA ESTRUCTURA
 -- ==========================================================
 
--- PRODUCTOS BASE con campo TIPO
-INSERT INTO productos (codigo, nombre, descripcion, id_categoria, tipo, unidad_medida) VALUES
--- TELAS CON TIPO
-('LIN-GUCCI-001', 'GUCCI', 'Línea GUCCI de telas de lino premium', 1, 'LINO', 'metro'),
-('LIN-VERSACE-001', 'VERSACE', 'Línea VERSACE de telas de lino', 1, 'LINO', 'metro'),
-('FEL-PREMIUM-001', 'PREMIUM', 'Línea premium de felpa suave', 1, 'FELPA', 'metro'),
-('ECO-LUXURY-001', 'LUXURY', 'Línea luxury de eco cuero', 1, 'ECO CUERO', 'metro'),
+-- PRODUCTOS BASE CON PLANTILLAS DE PRECIOS
+INSERT INTO productos (codigo, nombre, descripcion, id_categoria, tipo, unidad_medida, precio_costo_base, precio_neto_base, precio_neto_factura_base) VALUES
+-- TELAS (precios iguales para todas las variantes)
+('LIN-GUCCI-001', 'GUCCI', 'Línea GUCCI de telas de lino premium', 1, 'LINO', 'metro', 2500, 3800, 3193),
+('LIN-VERSACE-001', 'VERSACE', 'Línea VERSACE de telas de lino', 1, 'LINO', 'metro', 2300, 3500, 2941),
+('FEL-PREMIUM-001', 'PREMIUM', 'Línea premium de felpa suave', 1, 'FELPA', 'metro', 1800, 2500, 2101),
 
--- CORCHETES SIN TIPO (solo nombre genérico)
-('COR-001', 'CORCHETES', 'Corchetes metálicos en diferentes medidas', 4, NULL, 'unidad'),
-
--- OTROS PRODUCTOS
-('ACC-BOT-001', 'Botones Clásicos', 'Botones básicos para confección', 2, NULL, 'unidad'),
-('HIL-ALG-001', 'Hilo Algodón', 'Hilo de algodón para costura', 5, NULL, 'unidad');
+-- OTROS PRODUCTOS ADICIONALES
+('ACC-BOT-001', 'Botones Clásicos', 'Botones básicos para confección', 2, NULL, 'unidad', 100, 150, 126),
+('HIL-ALG-001', 'Hilo Algodón', 'Hilo de algodón para costura', 5, NULL, 'unidad', 300, 450, 378),
+('PAT-MAD-001', 'Pata Madera', 'Patas de madera para muebles', 3, 'MADERA', 'unidad', 500, 800, 672);
 
 -- VARIANTES DE PRODUCTOS
 INSERT INTO variantes_producto (id_producto, sku, color, medida, descripcion) VALUES
--- LINO GUCCI - Diferentes colores
-(1, 'LIN-GUCCI-BLANCO', 'Blanco', NULL, 'Lino Gucci color blanco'),
-(1, 'LIN-GUCCI-NEGRO', 'Negro', NULL, 'Lino Gucci color negro'),
-(1, 'LIN-GUCCI-AZUL', 'Azul', NULL, 'Lino Gucci color azul'),
-(1, 'LIN-GUCCI-ROJO', 'Rojo', NULL, 'Lino Gucci color rojo'),
-(1, 'LIN-GUCCI-VERDE', 'Verde', NULL, 'Lino Gucci color verde'),
-
--- LINO VERSACE - Diferentes colores
-(2, 'LIN-VERSACE-BLANCO', 'Blanco', NULL, 'Lino Versace color blanco'),
-(2, 'LIN-VERSACE-NEGRO', 'Negro', NULL, 'Lino Versace color negro'),
-(2, 'LIN-VERSACE-DORADO', 'Dorado', NULL, 'Lino Versace color dorado'),
-
--- FELPA PREMIUM
-(3, 'FEL-PREMIUM-GRIS', 'Gris', NULL, 'Felpa premium color gris'),
-(3, 'FEL-PREMIUM-AZUL', 'Azul', NULL, 'Felpa premium color azul'),
-
--- ECO CUERO LUXURY
-(4, 'ECO-LUXURY-MARRON', 'Marrón', NULL, 'Eco cuero luxury color marrón'),
-(4, 'ECO-LUXURY-NEGRO', 'Negro', NULL, 'Eco cuero luxury color negro'),
-
--- CORCHETES - Diferentes medidas (SIN color)
-(5, 'COR-71', NULL, '71', 'Corchete medida 71'),
-(5, 'COR-12', NULL, '12', 'Corchete medida 12'),
-(5, 'COR-1445', NULL, '1445', 'Corchete medida 1445'),
-(5, 'COR-1450', NULL, '1450', 'Corchete medida 1450'),
-(5, 'COR-8012', NULL, '8012', 'Corchete medida 8012'),
-
--- OTROS PRODUCTOS
-(6, 'ACC-BOT-NE', 'Negro', NULL, 'Botones negros clásicos'),
-(7, 'HIL-ALG-BL', 'Blanco', NULL, 'Hilo algodón blanco');
-
--- MODALIDADES DE PRODUCTOS
-INSERT INTO modalidades_producto (
-    id_producto, nombre, descripcion, cantidad_base, es_cantidad_variable, minimo_cantidad, precio_costo, precio_neto, precio_neto_factura
-) VALUES
--- LINO GUCCI (id_producto = 1) - Por metro y rollo
-(1, 'metro', 'Venta al corte por metro', 1, TRUE, 0.1, 2500, 3800, 3193),
-(1, 'Rollo', 'Rollo completo de 30 metros', 30, FALSE, 30, 2200, 3500, 2941),
-
--- LINO VERSACE (id_producto = 2)
-(2, 'metro', 'Venta al corte por metro', 1, TRUE, 0.1, 2300, 3500, 2941),
-(2, 'Rollo', 'Rollo completo de 25 metros', 25, FALSE, 25, 2100, 3200, 2689),
-
--- FELPA PREMIUM (id_producto = 3)
-(3, 'metro', 'Venta al corte por metro', 1, TRUE, 0.1, 1800, 2500, 2101),
-(3, 'Rollo', 'Rollo completo de 15 metros', 15, FALSE, 15, 1700, 2200, 1849),
-
--- ECO CUERO LUXURY (id_producto = 4)
-(4, 'metro', 'Venta al corte por metro', 1, TRUE, 0.1, 3500, 5200, 4370),
-(4, 'Rollo', 'Rollo completo de 20 metros', 20, FALSE, 20, 3200, 4900, 4118),
-
--- CORCHETES (id_producto = 5)
-(5, 'Unidad', 'Corchete individual', 1, FALSE, 1, 80, 150, 126),
-(5, 'embalaje', 'Pack de 20 cajas', 10, FALSE, 10, 75, 140, 118),
-
--- BOTONES CLÁSICOS (id_producto = 6)
-(6, 'Unidad', '1 botón', 1, FALSE, 1, 100, 150, 126),
-(6, 'Pack 10', '10 botones', 10, FALSE, 10, 90, 130, 109),
-
--- HILO ALGODÓN (id_producto = 7)
-(7, 'Unidad', '1 rollo hilo', 1, FALSE, 1, 300, 450, 378);
--- STOCK INICIAL
-INSERT INTO stock_por_bodega (id_variante_producto, id_bodega, cantidad_disponible, stock_minimo) VALUES
--- LINO GUCCI
-(1, 1, 25.5, 5.0), (1, 2, 45.8, 15.0), (1, 3, 20.3, 8.0),
-(2, 1, 18.2, 5.0), (2, 2, 38.5, 15.0), (2, 3, 15.8, 8.0),
-(3, 1, 22.1, 5.0), (3, 2, 42.3, 15.0), (3, 3, 18.5, 8.0),
-(4, 1, 16.8, 5.0), (4, 2, 35.2, 15.0), (4, 3, 12.8, 8.0),
-(5, 1, 28.3, 5.0), (5, 2, 48.5, 15.0), (5, 3, 22.8, 8.0),
+-- LINO GUCCI - Todos heredarán el mismo precio
+(1, 'LIN-GUCCI-BLA', 'Blanco', NULL, 'Lino Gucci color Blanco'),
+(1, 'LIN-GUCCI-NEG', 'Negro', NULL, 'Lino Gucci color Negro'),
+(1, 'LIN-GUCCI-AZU', 'Azul', NULL, 'Lino Gucci color Azul'),
+(1, 'LIN-GUCCI-ROJ', 'Rojo', NULL, 'Lino Gucci color Rojo'),
+(1, 'LIN-GUCCI-VER', 'Verde', NULL, 'Lino Gucci color Verde'),
 
 -- LINO VERSACE
-(6, 1, 15.5, 4.0), (6, 2, 32.8, 12.0), (6, 3, 18.2, 6.0),
-(7, 1, 12.3, 4.0), (7, 2, 28.5, 12.0), (7, 3, 15.8, 6.0),
-(8, 1, 8.5, 3.0), (8, 2, 18.2, 8.0), (8, 3, 10.5, 4.0),
+(2, 'LIN-VERSACE-BLA', 'Blanco', NULL, 'Lino Versace color Blanco'),
+(2, 'LIN-VERSACE-NEG', 'Negro', NULL, 'Lino Versace color Negro'),
+(2, 'LIN-VERSACE-DOR', 'Dorado', NULL, 'Lino Versace color Dorado'),
 
--- FELPA PREMIUM
-(9, 1, 35.2, 8.0), (9, 2, 65.8, 20.0), (9, 3, 28.5, 10.0),
-(10, 1, 28.8, 8.0), (10, 2, 55.2, 20.0), (10, 3, 22.8, 10.0),
+-- FELPA PREMIUM  
+(3, 'FEL-PREMIUM-GRI', 'Gris', NULL, 'Felpa premium color Gris'),
+(3, 'FEL-PREMIUM-AZU', 'Azul', NULL, 'Felpa premium color Azul'),
 
--- ECO CUERO LUXURY
-(11, 1, 12.5, 3.0), (11, 2, 25.8, 8.0), (11, 3, 15.2, 5.0),
-(12, 1, 8.8, 3.0), (12, 2, 18.5, 8.0), (12, 3, 10.8, 5.0),
+-- CORCHETES - Cada medida tendrá precio diferente
+(4, 'COR-71', NULL, '71', 'Corchete medida 71'),
+(4, 'COR-12', NULL, '12', 'Corchete medida 12'),
+(4, 'COR-1445', NULL, '1445', 'Corchete medida 1445'),
+(4, 'COR-1450', NULL, '1450', 'Corchete medida 1450'),
+(4, 'COR-8012', NULL, '8012', 'Corchete medida 8012'),
 
--- CORCHETES
-(13, 1, 150, 30), (13, 2, 500, 100), (13, 3, 250, 50),
-(14, 1, 200, 40), (14, 2, 800, 150), (14, 3, 350, 70),
-(15, 1, 85, 20), (15, 2, 320, 80), (15, 3, 150, 40),
-(16, 1, 95, 25), (16, 2, 380, 90), (16, 3, 180, 45),
-(17, 1, 45, 15), (17, 2, 180, 50), (17, 3, 80, 25),
-
--- OTROS
-(18, 1, 85, 20), (18, 2, 320, 80), (18, 3, 150, 40),
-(19, 1, 65, 20), (19, 2, 240, 60), (19, 3, 120, 30);
+-- OTROS PRODUCTOS
+(5, 'ACC-BOT-NE', 'Negro', NULL, 'Botones negros clásicos'),
+(5, 'ACC-BOT-BL', 'Blanco', NULL, 'Botones blancos clásicos'),
+(6, 'HIL-ALG-BL', 'Blanco', NULL, 'Hilo algodón blanco'),
+(6, 'HIL-ALG-NE', 'Negro', NULL, 'Hilo algodón negro'),
+(7, 'PAT-MAD-NAT', 'Natural', NULL, 'Pata madera natural'),
+(7, 'PAT-MAD-TEÑ', 'Teñida', NULL, 'Pata madera teñida');
 
 -- Cliente ejemplo
 INSERT INTO clientes (rut, tipo_cliente, nombre, datos_completos) VALUES
@@ -1068,26 +1149,107 @@ INSERT INTO clientes (rut, tipo_cliente, nombre, datos_completos) VALUES
 -- ==========================================================
 
 SELECT 
-    'Base de datos SANTITELAS actualizada exitosamente' AS resultado,
+    'Base de datos SANTITELAS con modalidades por variante creada exitosamente' AS resultado,
     CONCAT('Productos: ', (SELECT COUNT(*) FROM productos)) AS productos_creados,
     CONCAT('Variantes: ', (SELECT COUNT(*) FROM variantes_producto)) AS variantes_creadas,
     CONCAT('Modalidades: ', (SELECT COUNT(*) FROM modalidades_producto)) AS modalidades_creadas,
-    CONCAT('Tipos documento: ', (SELECT COUNT(*) FROM tipos_documento)) AS tipos_documento,
-    CONCAT('Funciones: ', (SELECT COUNT(*) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = 'santitelas' AND ROUTINE_TYPE = 'FUNCTION')) AS funciones_creadas,
-    NOW() AS fecha_actualizacion;
+    NOW() AS fecha_creacion;
 
--- CONSULTA PARA VERIFICAR LA ESTRUCTURA
+-- ==========================================================
+-- AJUSTES DE PRECIOS ESPECÍFICOS (después de la creación inicial)
+-- ==========================================================
+
+-- Actualizar precios específicos para corchetes (diferentes por medida)
+UPDATE modalidades_producto mp
+JOIN variantes_producto vp ON mp.id_variante_producto = vp.id_variante_producto
+SET 
+    mp.precio_costo = CASE vp.medida
+        WHEN '71' THEN 85
+        WHEN '12' THEN 90
+        WHEN '1445' THEN 120
+        WHEN '1450' THEN 125
+        WHEN '8012' THEN 140
+        ELSE mp.precio_costo
+    END,
+    mp.precio_neto = CASE vp.medida
+        WHEN '71' THEN 160
+        WHEN '12' THEN 170
+        WHEN '1445' THEN 220
+        WHEN '1450' THEN 230
+        WHEN '8012' THEN 250
+        ELSE mp.precio_neto
+    END,
+    mp.precio_neto_factura = CASE vp.medida
+        WHEN '71' THEN 134
+        WHEN '12' THEN 143
+        WHEN '1445' THEN 185
+        WHEN '1450' THEN 193
+        WHEN '8012' THEN 210
+        ELSE mp.precio_neto_factura
+    END
+WHERE vp.medida IN ('71', '12', '1445', '1450', '8012');
+
+-- Crear oferta especial para GUCCI Rojo (ejemplo de precio personalizado)
+UPDATE modalidades_producto mp
+JOIN variantes_producto vp ON mp.id_variante_producto = vp.id_variante_producto
+SET 
+    mp.precio_neto = 3200,  -- Descuento de $600
+    mp.precio_neto_factura = 2689
+WHERE vp.color = 'Rojo' AND vp.sku = 'LIN-GUCCI-ROJ';
+
+-- Ajustar precios para modalidades EMBALAJE de corchetes (descuento por cantidad)
+UPDATE modalidades_producto mp
+JOIN variantes_producto vp ON mp.id_variante_producto = vp.id_variante_producto
+SET 
+    mp.precio_costo = CASE vp.medida
+        WHEN '71' THEN 75
+        WHEN '12' THEN 80
+        WHEN '1445' THEN 105
+        WHEN '1450' THEN 110
+        WHEN '8012' THEN 125
+        ELSE mp.precio_costo
+    END,
+    mp.precio_neto = CASE vp.medida
+        WHEN '71' THEN 140
+        WHEN '12' THEN 150
+        WHEN '1445' THEN 190
+        WHEN '1450' THEN 200
+        WHEN '8012' THEN 220
+        ELSE mp.precio_neto
+    END,
+    mp.precio_neto_factura = CASE vp.medida
+        WHEN '71' THEN 118
+        WHEN '12' THEN 126
+        WHEN '1445' THEN 160
+        WHEN '1450' THEN 168
+        WHEN '8012' THEN 185
+        ELSE mp.precio_neto_factura
+    END
+WHERE vp.medida IN ('71', '12', '1445', '1450', '8012') AND mp.nombre = 'EMBALAJE';
+
+-- Ejemplo: Promoción especial para hilos negros
+UPDATE modalidades_producto mp
+JOIN variantes_producto vp ON mp.id_variante_producto = vp.id_variante_producto
+JOIN productos p ON vp.id_producto = p.id_producto
+SET 
+    mp.precio_neto = 380,  -- Descuento de $70
+    mp.precio_neto_factura = 319
+WHERE vp.color = 'Negro' AND p.codigo = 'HIL-ALG-001';
+
+-- Verificar estructura de precios
 SELECT 
-    '=== VERIFICACIÓN DE ESTRUCTURA FINAL ===' AS titulo;
+    '=== VERIFICACIÓN DE PRECIOS POR VARIANTE ===' AS titulo;
 
 SELECT 
-    c.nombre AS CATEGORIA,
+    p.nombre AS PRODUCTO,
     COALESCE(p.tipo, '(Sin tipo)') AS TIPO,
-    p.nombre AS LINEA_MARCA,
-    COUNT(DISTINCT vp.id_variante_producto) AS TOTAL_VARIANTES
-FROM categorias c
-JOIN productos p ON c.id_categoria = p.id_categoria
+    vp.color,
+    vp.medida,
+    mp.nombre AS MODALIDAD,
+    mp.precio_neto AS PRECIO_NETO,
+    mp.precio_neto_factura AS PRECIO_FACTURA
+FROM productos p
 JOIN variantes_producto vp ON p.id_producto = vp.id_producto
-WHERE p.activo = TRUE AND vp.activo = TRUE
-GROUP BY c.nombre, p.tipo, p.nombre
-ORDER BY c.nombre, p.tipo, p.nombre;
+JOIN modalidades_producto mp ON vp.id_variante_producto = mp.id_variante_producto
+WHERE p.activo = TRUE AND vp.activo = TRUE AND mp.activa = TRUE
+ORDER BY p.nombre, vp.color, vp.medida, mp.nombre;
