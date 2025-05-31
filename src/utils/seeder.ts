@@ -1,4 +1,4 @@
-// src/utils/seeder.ts - VERSIÓN CORREGIDA CON DATOS DE EJEMPLO
+// src/utils/seeder.ts - VERSIÓN CORREGIDA
 import { 
   Rol, 
   Usuario, 
@@ -42,7 +42,7 @@ export async function seedDatabase() {
   }
 }
 
-// ✅ FUNCIÓN CORREGIDA PARA CREAR PRODUCTOS COMPLETOS
+// ✅ FUNCIÓN CORREGIDA: MODALIDADES POR VARIANTE
 async function createProductsWithVariantsAndModalities() {
   try {
     console.log('📦 Creando productos con variantes y modalidades...');
@@ -60,45 +60,17 @@ async function createProductsWithVariantsAndModalities() {
         tipo: 'LINO',
         unidad_medida: 'metro',
         stock_minimo_total: 50,
+        precio_costo_base: 2500,
+        precio_neto_base: 3800,
+        precio_neto_factura_base: 3193,
         activo: true
       }
     });
 
-    // MODALIDADES para LINO GUCCI
-    await ModalidadProducto.findOrCreate({
-      where: { id_producto: productoLinoGucci.id_producto, nombre: 'METRO' },
-      defaults: {
-        id_producto: productoLinoGucci.id_producto,
-        nombre: 'METRO',
-        descripcion: 'Venta al corte por metro',
-        cantidad_base: 1,
-        es_cantidad_variable: true,
-        minimo_cantidad: 0.1,
-        precio_costo: 2500,
-        precio_neto: 3800,
-        precio_neto_factura: 3193,
-        activa: true
-      }
-    });
-
-    await ModalidadProducto.findOrCreate({
-      where: { id_producto: productoLinoGucci.id_producto, nombre: 'ROLLO' },
-      defaults: {
-        id_producto: productoLinoGucci.id_producto,
-        nombre: 'ROLLO',
-        descripcion: 'Rollo completo de 30 metros',
-        cantidad_base: 30,
-        es_cantidad_variable: false,
-        minimo_cantidad: 30,
-        precio_costo: 2200,
-        precio_neto: 3500,
-        precio_neto_factura: 2941,
-        activa: true
-      }
-    });
-
-    // VARIANTES para LINO GUCCI
+    // CREAR VARIANTES PRIMERO
     const coloresLino = ['Blanco', 'Negro', 'Azul', 'Rojo', 'Verde'];
+    const variantesGucci = [];
+    
     for (const color of coloresLino) {
       const [variante] = await VarianteProducto.findOrCreate({
         where: { 
@@ -112,6 +84,50 @@ async function createProductsWithVariantsAndModalities() {
           descripcion: `Lino Gucci color ${color}`,
           stock_minimo: 10,
           activo: true
+        }
+      });
+      variantesGucci.push(variante);
+    }
+
+    // CREAR MODALIDADES PARA CADA VARIANTE
+    for (const variante of variantesGucci) {
+      // Modalidad METRO
+      await ModalidadProducto.findOrCreate({
+        where: { 
+          id_variante_producto: variante.id_variante_producto, 
+          nombre: 'METRO' 
+        },
+        defaults: {
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'METRO',
+          descripcion: 'Venta al corte por metro',
+          cantidad_base: 1,
+          es_cantidad_variable: true,
+          minimo_cantidad: 0.1,
+          precio_costo: 2500,
+          precio_neto: 3800,
+          precio_neto_factura: 3193,
+          activa: true
+        }
+      });
+
+      // Modalidad ROLLO
+      await ModalidadProducto.findOrCreate({
+        where: { 
+          id_variante_producto: variante.id_variante_producto, 
+          nombre: 'ROLLO' 
+        },
+        defaults: {
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'ROLLO',
+          descripcion: 'Rollo completo de 30 metros',
+          cantidad_base: 30,
+          es_cantidad_variable: false,
+          minimo_cantidad: 30,
+          precio_costo: 2200,
+          precio_neto: 3500,
+          precio_neto_factura: 2941,
+          activa: true
         }
       });
     }
@@ -129,47 +145,18 @@ async function createProductsWithVariantsAndModalities() {
         tipo: 'LINO',
         unidad_medida: 'metro',
         stock_minimo_total: 40,
+        precio_costo_base: 2300,
+        precio_neto_base: 3500,
+        precio_neto_factura_base: 2941,
         activo: true
       }
     });
 
-    // MODALIDADES para LINO VERSACE
-    await ModalidadProducto.findOrCreate({
-      where: { id_producto: productoLinoVersace.id_producto, nombre: 'METRO' },
-      defaults: {
-        id_producto: productoLinoVersace.id_producto,
-        nombre: 'METRO',
-        descripcion: 'Venta al corte por metro',
-        cantidad_base: 1,
-        es_cantidad_variable: true,
-        minimo_cantidad: 0.1,
-        precio_costo: 2300,
-        precio_neto: 3500,
-        precio_neto_factura: 2941,
-        activa: true
-      }
-    });
-
-    await ModalidadProducto.findOrCreate({
-      where: { id_producto: productoLinoVersace.id_producto, nombre: 'ROLLO' },
-      defaults: {
-        id_producto: productoLinoVersace.id_producto,
-        nombre: 'ROLLO',
-        descripcion: 'Rollo completo de 25 metros',
-        cantidad_base: 25,
-        es_cantidad_variable: false,
-        minimo_cantidad: 25,
-        precio_costo: 2100,
-        precio_neto: 3200,
-        precio_neto_factura: 2689,
-        activa: true
-      }
-    });
-
-    // VARIANTES para LINO VERSACE
     const coloresVersace = ['Blanco', 'Negro', 'Dorado'];
+    const variantesVersace = [];
+    
     for (const color of coloresVersace) {
-      await VarianteProducto.findOrCreate({
+      const [variante] = await VarianteProducto.findOrCreate({
         where: { 
           id_producto: productoLinoVersace.id_producto,
           color: color 
@@ -181,6 +168,48 @@ async function createProductsWithVariantsAndModalities() {
           descripcion: `Lino Versace color ${color}`,
           stock_minimo: 8,
           activo: true
+        }
+      });
+      variantesVersace.push(variante);
+    }
+
+    // MODALIDADES PARA CADA VARIANTE VERSACE
+    for (const variante of variantesVersace) {
+      await ModalidadProducto.findOrCreate({
+        where: { 
+          id_variante_producto: variante.id_variante_producto, 
+          nombre: 'METRO' 
+        },
+        defaults: {
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'METRO',
+          descripcion: 'Venta al corte por metro',
+          cantidad_base: 1,
+          es_cantidad_variable: true,
+          minimo_cantidad: 0.1,
+          precio_costo: 2300,
+          precio_neto: 3500,
+          precio_neto_factura: 2941,
+          activa: true
+        }
+      });
+
+      await ModalidadProducto.findOrCreate({
+        where: { 
+          id_variante_producto: variante.id_variante_producto, 
+          nombre: 'ROLLO' 
+        },
+        defaults: {
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'ROLLO',
+          descripcion: 'Rollo completo de 25 metros',
+          cantidad_base: 25,
+          es_cantidad_variable: false,
+          minimo_cantidad: 25,
+          precio_costo: 2100,
+          precio_neto: 3200,
+          precio_neto_factura: 2689,
+          activa: true
         }
       });
     }
@@ -198,47 +227,18 @@ async function createProductsWithVariantsAndModalities() {
         tipo: null,
         unidad_medida: 'unidad',
         stock_minimo_total: 100,
+        precio_costo_base: 80,
+        precio_neto_base: 150,
+        precio_neto_factura_base: 126,
         activo: true
       }
     });
 
-    // MODALIDADES para CORCHETES
-    await ModalidadProducto.findOrCreate({
-      where: { id_producto: productoCorchetes.id_producto, nombre: 'UNIDAD' },
-      defaults: {
-        id_producto: productoCorchetes.id_producto,
-        nombre: 'UNIDAD',
-        descripcion: 'Corchete individual',
-        cantidad_base: 1,
-        es_cantidad_variable: false,
-        minimo_cantidad: 1,
-        precio_costo: 80,
-        precio_neto: 150,
-        precio_neto_factura: 126,
-        activa: true
-      }
-    });
-
-    await ModalidadProducto.findOrCreate({
-      where: { id_producto: productoCorchetes.id_producto, nombre: 'EMBALAJE' },
-      defaults: {
-        id_producto: productoCorchetes.id_producto,
-        nombre: 'EMBALAJE',
-        descripcion: 'Pack de 20 cajas',
-        cantidad_base: 10,
-        es_cantidad_variable: false,
-        minimo_cantidad: 10,
-        precio_costo: 75,
-        precio_neto: 140,
-        precio_neto_factura: 118,
-        activa: true
-      }
-    });
-
-    // VARIANTES para CORCHETES (por medidas)
     const medidasCorchetes = ['71', '12', '1445', '1450', '8012'];
+    const variantesCorchetes = [];
+    
     for (const medida of medidasCorchetes) {
-      await VarianteProducto.findOrCreate({
+      const [variante] = await VarianteProducto.findOrCreate({
         where: { 
           id_producto: productoCorchetes.id_producto,
           medida: medida 
@@ -252,9 +252,158 @@ async function createProductsWithVariantsAndModalities() {
           activo: true
         }
       });
+      variantesCorchetes.push(variante);
     }
 
-    console.log('✅ Productos con variantes y modalidades creados');
+    // MODALIDADES PARA CORCHETES CON PRECIOS ESPECÍFICOS POR MEDIDA
+    for (const variante of variantesCorchetes) {
+      // Precios específicos según medida
+      let precioUnitario = 150;
+      let precioCosto = 80;
+      let precioFactura = 126;
+      
+      switch (variante.medida) {
+        case '71':
+          precioUnitario = 160; precioCosto = 85; precioFactura = 134;
+          break;
+        case '12':
+          precioUnitario = 170; precioCosto = 90; precioFactura = 143;
+          break;
+        case '1445':
+          precioUnitario = 220; precioCosto = 120; precioFactura = 185;
+          break;
+        case '1450':
+          precioUnitario = 230; precioCosto = 125; precioFactura = 193;
+          break;
+        case '8012':
+          precioUnitario = 250; precioCosto = 140; precioFactura = 210;
+          break;
+      }
+
+      // Modalidad UNIDAD
+      await ModalidadProducto.findOrCreate({
+        where: { 
+          id_variante_producto: variante.id_variante_producto, 
+          nombre: 'UNIDAD' 
+        },
+        defaults: {
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'UNIDAD',
+          descripcion: 'Corchete individual',
+          cantidad_base: 1,
+          es_cantidad_variable: false,
+          minimo_cantidad: 1,
+          precio_costo: precioCosto,
+          precio_neto: precioUnitario,
+          precio_neto_factura: precioFactura,
+          activa: true
+        }
+      });
+
+      // Modalidad EMBALAJE (con descuento)
+      await ModalidadProducto.findOrCreate({
+        where: { 
+          id_variante_producto: variante.id_variante_producto, 
+          nombre: 'EMBALAJE' 
+        },
+        defaults: {
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'EMBALAJE',
+          descripcion: 'Pack de 10 unidades',
+          cantidad_base: 10,
+          es_cantidad_variable: false,
+          minimo_cantidad: 10,
+          precio_costo: Math.round(precioCosto * 0.9),
+          precio_neto: Math.round(precioUnitario * 0.9),
+          precio_neto_factura: Math.round(precioFactura * 0.9),
+          activa: true
+        }
+      });
+    }
+
+    // ========================================
+    // PRODUCTO 4: HILOS (EJEMPLO ADICIONAL)
+    // ========================================
+    const [productoHilos] = await Producto.findOrCreate({
+      where: { codigo: 'HIL-ALG-001' },
+      defaults: {
+        codigo: 'HIL-ALG-001',
+        nombre: 'HILO ALGODÓN',
+        descripcion: 'Hilo de algodón para costura',
+        id_categoria: 3, // HILOS
+        tipo: 'ALGODÓN',
+        unidad_medida: 'unidad',
+        stock_minimo_total: 50,
+        precio_costo_base: 300,
+        precio_neto_base: 450,
+        precio_neto_factura_base: 378,
+        activo: true
+      }
+    });
+
+    const coloresHilo = ['Blanco', 'Negro', 'Azul', 'Rojo'];
+    const variantesHilo = [];
+    
+    for (const color of coloresHilo) {
+      const [variante] = await VarianteProducto.findOrCreate({
+        where: { 
+          id_producto: productoHilos.id_producto,
+          color: color 
+        },
+        defaults: {
+          id_producto: productoHilos.id_producto,
+          sku: `HIL-ALG-${color.substring(0, 3).toUpperCase()}`,
+          color: color,
+          descripcion: `Hilo algodón color ${color}`,
+          stock_minimo: 5,
+          activo: true
+        }
+      });
+      variantesHilo.push(variante);
+    }
+
+    // MODALIDADES PARA HILOS
+    for (const variante of variantesHilo) {
+      await ModalidadProducto.findOrCreate({
+        where: { 
+          id_variante_producto: variante.id_variante_producto, 
+          nombre: 'UNIDAD' 
+        },
+        defaults: {
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'UNIDAD',
+          descripcion: 'Carrete individual',
+          cantidad_base: 1,
+          es_cantidad_variable: false,
+          minimo_cantidad: 1,
+          precio_costo: 300,
+          precio_neto: 450,
+          precio_neto_factura: 378,
+          activa: true
+        }
+      });
+
+      await ModalidadProducto.findOrCreate({
+        where: { 
+          id_variante_producto: variante.id_variante_producto, 
+          nombre: 'CAJA' 
+        },
+        defaults: {
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'CAJA',
+          descripcion: 'Caja de 12 carretes',
+          cantidad_base: 12,
+          es_cantidad_variable: false,
+          minimo_cantidad: 12,
+          precio_costo: 280,
+          precio_neto: 420,
+          precio_neto_factura: 353,
+          activa: true
+        }
+      });
+    }
+
+    console.log('✅ Productos con variantes y modalidades creados correctamente');
 
   } catch (error) {
     console.error('❌ Error creando productos:', error);

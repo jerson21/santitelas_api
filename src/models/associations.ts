@@ -1,4 +1,4 @@
-// src/models/associations.ts - ASOCIACIONES PARA NUEVA ESTRUCTURA BD
+// src/models/associations.ts - VERSIÓN CORREGIDA
 import { Categoria } from './Categoria.model';
 import { Producto } from './Producto.model';
 import { VarianteProducto } from './VarianteProducto.model';
@@ -9,148 +9,298 @@ import { StockPorBodega } from './StockPorBodega.model';
 import { MovimientoStock } from './MovimientoStock.model';
 import { Usuario } from './Usuario.model';
 import { Bodega } from './Bodega.model';
+import { Cliente } from './Cliente.model';
+import { TurnoCaja } from './TurnoCaja.model';
+import { Caja } from './Caja.model';
+import { ArqueoCaja } from './ArqueoCaja.model';
+import { Venta } from './Venta.model';
+import { Pago } from './Pago.model';
+import { MetodoPago } from './MetodoPago.model';
+import { TipoDocumento } from './TipoDocumento.model';
+import { Rol } from './Rol.model';
 
 export function setupAssociations() {
-  // ✅ ASOCIACIONES DE CATEGORÍA Y PRODUCTO
-  Categoria.hasMany(Producto, {
-    foreignKey: 'id_categoria',
-    as: 'productos'
-  });
+  try {
+    console.log('🔗 Configurando asociaciones corregidas...');
 
-  Producto.belongsTo(Categoria, {
-    foreignKey: 'id_categoria',
-    as: 'categoria'
-  });
+    // ===============================
+    // USUARIOS Y ROLES
+    // ===============================
+    Usuario.belongsTo(Rol, { 
+      foreignKey: 'id_rol', 
+      as: 'rol' 
+    });
+    Rol.hasMany(Usuario, { 
+      foreignKey: 'id_rol', 
+      as: 'usuarios' 
+    });
 
-  // ✅ ASOCIACIONES DE PRODUCTO Y VARIANTES
-  Producto.hasMany(VarianteProducto, {
-    foreignKey: 'id_producto',
-    as: 'variantes'
-  });
+    // ===============================
+    // PRODUCTOS Y CATEGORÍAS
+    // ===============================
+    Producto.belongsTo(Categoria, { 
+      foreignKey: 'id_categoria', 
+      as: 'categoria' 
+    });
+    Categoria.hasMany(Producto, { 
+      foreignKey: 'id_categoria', 
+      as: 'productos' 
+    });
 
-  VarianteProducto.belongsTo(Producto, {
-    foreignKey: 'id_producto',
-    as: 'producto'
-  });
+    // ===============================
+    // PRODUCTO → VARIANTES
+    // ===============================
+    Producto.hasMany(VarianteProducto, { 
+      foreignKey: 'id_producto', 
+      as: 'variantes' 
+    });
+    VarianteProducto.belongsTo(Producto, { 
+      foreignKey: 'id_producto', 
+      as: 'producto' 
+    });
 
-  // ✅ NUEVA ESTRUCTURA: VARIANTE → MODALIDADES
-  VarianteProducto.hasMany(ModalidadProducto, {
-    foreignKey: 'id_variante_producto',
-    as: 'modalidades'
-  });
+    // ===============================
+    // VARIANTE → MODALIDADES (CLAVE)
+    // ===============================
+    VarianteProducto.hasMany(ModalidadProducto, { 
+      foreignKey: 'id_variante_producto', 
+      as: 'modalidades' 
+    });
+    ModalidadProducto.belongsTo(VarianteProducto, { 
+      foreignKey: 'id_variante_producto', 
+      as: 'varianteProducto' 
+    });
 
-  ModalidadProducto.belongsTo(VarianteProducto, {
-    foreignKey: 'id_variante_producto',
-    as: 'varianteProducto'
-  });
+    // ===============================
+    // STOCK POR BODEGA
+    // ===============================
+    VarianteProducto.hasMany(StockPorBodega, { 
+      foreignKey: 'id_variante_producto', 
+      as: 'stockPorBodega' 
+    });
+    StockPorBodega.belongsTo(VarianteProducto, { 
+      foreignKey: 'id_variante_producto', 
+      as: 'varianteProducto' 
+    });
+    
+    Bodega.hasMany(StockPorBodega, { 
+      foreignKey: 'id_bodega', 
+      as: 'stocks' 
+    });
+    StockPorBodega.belongsTo(Bodega, { 
+      foreignKey: 'id_bodega', 
+      as: 'bodega' 
+    });
 
-  // ✅ ASOCIACIONES DE STOCK
-  VarianteProducto.hasMany(StockPorBodega, {
-    foreignKey: 'id_variante_producto',
-    as: 'stockPorBodega'
-  });
+    // ===============================
+    // MOVIMIENTOS DE STOCK
+    // ===============================
+    VarianteProducto.hasMany(MovimientoStock, { 
+      foreignKey: 'id_variante_producto', 
+      as: 'movimientos' 
+    });
+    MovimientoStock.belongsTo(VarianteProducto, { 
+      foreignKey: 'id_variante_producto', 
+      as: 'varianteProducto' 
+    });
+    
+    Bodega.hasMany(MovimientoStock, { 
+      foreignKey: 'id_bodega', 
+      as: 'movimientosOrigen' 
+    });
+    MovimientoStock.belongsTo(Bodega, { 
+      foreignKey: 'id_bodega', 
+      as: 'bodega' 
+    });
+    
+    MovimientoStock.belongsTo(Bodega, { 
+      foreignKey: 'id_bodega_destino', 
+      as: 'bodegaDestino' 
+    });
+    
+    Usuario.hasMany(MovimientoStock, { 
+      foreignKey: 'id_usuario', 
+      as: 'movimientosStock' 
+    });
+    MovimientoStock.belongsTo(Usuario, { 
+      foreignKey: 'id_usuario', 
+      as: 'usuario' 
+    });
 
-  StockPorBodega.belongsTo(VarianteProducto, {
-    foreignKey: 'id_variante_producto',
-    as: 'varianteProducto'
-  });
+    // ===============================
+    // CLIENTES Y PEDIDOS
+    // ===============================
+    Cliente.hasMany(Pedido, { 
+      foreignKey: 'id_cliente', 
+      as: 'pedidos' 
+    });
+    Pedido.belongsTo(Cliente, { 
+      foreignKey: 'id_cliente', 
+      as: 'cliente' 
+    });
 
-  StockPorBodega.belongsTo(Bodega, {
-    foreignKey: 'id_bodega',
-    as: 'bodega'
-  });
+    // ===============================
+    // VENDEDORES Y PEDIDOS
+    // ===============================
+    Usuario.hasMany(Pedido, { 
+      foreignKey: 'id_vendedor', 
+      as: 'pedidosVendedor' 
+    });
+    Pedido.belongsTo(Usuario, { 
+      foreignKey: 'id_vendedor', 
+      as: 'vendedor' 
+    });
 
-  Bodega.hasMany(StockPorBodega, {
-    foreignKey: 'id_bodega',
-    as: 'stocks'
-  });
+    // ===============================
+    // DETALLE PEDIDOS (ESTRUCTURA CORRECTA)
+    // ===============================
+    Pedido.hasMany(DetallePedido, { 
+      foreignKey: 'id_pedido', 
+      as: 'detalles', 
+      onDelete: 'CASCADE' 
+    });
+    DetallePedido.belongsTo(Pedido, { 
+      foreignKey: 'id_pedido', 
+      as: 'pedido' 
+    });
+    
+    // DETALLE → VARIANTE
+    VarianteProducto.hasMany(DetallePedido, { 
+      foreignKey: 'id_variante_producto', 
+      as: 'detallesPedidos' 
+    });
+    DetallePedido.belongsTo(VarianteProducto, { 
+      foreignKey: 'id_variante_producto', 
+      as: 'varianteProducto' 
+    });
+    
+    // DETALLE → MODALIDAD
+    ModalidadProducto.hasMany(DetallePedido, { 
+      foreignKey: 'id_modalidad', 
+      as: 'detallesPedidos' 
+    });
+    DetallePedido.belongsTo(ModalidadProducto, { 
+      foreignKey: 'id_modalidad', 
+      as: 'modalidad' 
+    });
 
-  // ✅ ASOCIACIONES DE MOVIMIENTOS
-  VarianteProducto.hasMany(MovimientoStock, {
-    foreignKey: 'id_variante_producto',
-    as: 'movimientos'
-  });
+    // ===============================
+    // AUTORIZACIONES DE PRECIO
+    // ===============================
+    Usuario.hasMany(DetallePedido, { 
+      foreignKey: 'precio_autorizado_por', 
+      as: 'autorizacionesPrecios' 
+    });
+    DetallePedido.belongsTo(Usuario, { 
+      foreignKey: 'precio_autorizado_por', 
+      as: 'usuarioAutorizador' 
+    });
 
-  MovimientoStock.belongsTo(VarianteProducto, {
-    foreignKey: 'id_variante_producto',
-    as: 'varianteProducto'
-  });
+    // ===============================
+    // CAJAS Y TURNOS
+    // ===============================
+    Caja.hasMany(TurnoCaja, { 
+      foreignKey: 'id_caja', 
+      as: 'turnos' 
+    });
+    TurnoCaja.belongsTo(Caja, { 
+      foreignKey: 'id_caja', 
+      as: 'caja' 
+    });
+    
+    Usuario.hasMany(TurnoCaja, { 
+      foreignKey: 'id_cajero', 
+      as: 'turnosCajero' 
+    });
+    TurnoCaja.belongsTo(Usuario, { 
+      foreignKey: 'id_cajero', 
+      as: 'cajero' 
+    });
 
-  MovimientoStock.belongsTo(Bodega, {
-    foreignKey: 'id_bodega',
-    as: 'bodega'
-  });
+    // ===============================
+    // ARQUEOS
+    // ===============================
+    TurnoCaja.hasOne(ArqueoCaja, { 
+      foreignKey: 'id_turno', 
+      as: 'arqueo' 
+    });
+    ArqueoCaja.belongsTo(TurnoCaja, { 
+      foreignKey: 'id_turno', 
+      as: 'turno' 
+    });
 
-  MovimientoStock.belongsTo(Bodega, {
-    foreignKey: 'id_bodega_destino',
-    as: 'bodegaDestino'
-  });
+    // ===============================
+    // VENTAS
+    // ===============================
+    Pedido.hasOne(Venta, { 
+      foreignKey: 'id_pedido', 
+      as: 'venta' 
+    });
+    Venta.belongsTo(Pedido, { 
+      foreignKey: 'id_pedido', 
+      as: 'pedido' 
+    });
+    
+    TurnoCaja.hasMany(Venta, { 
+      foreignKey: 'id_turno', 
+      as: 'ventas' 
+    });
+    Venta.belongsTo(TurnoCaja, { 
+      foreignKey: 'id_turno', 
+      as: 'turno' 
+    });
+    
+    TipoDocumento.hasMany(Venta, { 
+      foreignKey: 'id_tipo_documento', 
+      as: 'ventas' 
+    });
+    Venta.belongsTo(TipoDocumento, { 
+      foreignKey: 'id_tipo_documento', 
+      as: 'tipoDocumento' 
+    });
+    
+    Bodega.hasMany(Venta, { 
+      foreignKey: 'id_bodega', 
+      as: 'ventasBodega' 
+    });
+    Venta.belongsTo(Bodega, { 
+      foreignKey: 'id_bodega', 
+      as: 'bodega' 
+    });
 
-  MovimientoStock.belongsTo(Usuario, {
-    foreignKey: 'id_usuario',
-    as: 'usuario'
-  });
+    // ===============================
+    // PAGOS
+    // ===============================
+    Venta.hasMany(Pago, { 
+      foreignKey: 'id_venta', 
+      as: 'pagos', 
+      onDelete: 'CASCADE' 
+    });
+    Pago.belongsTo(Venta, { 
+      foreignKey: 'id_venta', 
+      as: 'venta' 
+    });
+    
+    MetodoPago.hasMany(Pago, { 
+      foreignKey: 'id_metodo_pago', 
+      as: 'pagos' 
+    });
+    Pago.belongsTo(MetodoPago, { 
+      foreignKey: 'id_metodo_pago', 
+      as: 'metodoPago' 
+    });
 
-  // ✅ ASOCIACIONES DE PEDIDOS
-  Pedido.hasMany(DetallePedido, {
-    foreignKey: 'id_pedido',
-    as: 'detalles'
-  });
-
-  DetallePedido.belongsTo(Pedido, {
-    foreignKey: 'id_pedido',
-    as: 'pedido'
-  });
-
-  // ✅ NUEVA ESTRUCTURA: DETALLE → VARIANTE Y MODALIDAD
-  DetallePedido.belongsTo(VarianteProducto, {
-    foreignKey: 'id_variante_producto',
-    as: 'varianteProducto'
-  });
-
-  VarianteProducto.hasMany(DetallePedido, {
-    foreignKey: 'id_variante_producto',
-    as: 'detallesPedidos'
-  });
-
-  DetallePedido.belongsTo(ModalidadProducto, {
-    foreignKey: 'id_modalidad',
-    as: 'modalidad'
-  });
-
-  ModalidadProducto.hasMany(DetallePedido, {
-    foreignKey: 'id_modalidad',
-    as: 'detallesPedidos'
-  });
-
-  // ✅ ASOCIACIONES DE USUARIOS
-  DetallePedido.belongsTo(Usuario, {
-    foreignKey: 'precio_autorizado_por',
-    as: 'usuarioAutorizador'
-  });
-
-  Usuario.hasMany(DetallePedido, {
-    foreignKey: 'precio_autorizado_por',
-    as: 'preciosAutorizados'
-  });
-
-  Pedido.belongsTo(Usuario, {
-    foreignKey: 'id_vendedor',
-    as: 'vendedor'
-  });
-
-  Usuario.hasMany(Pedido, {
-    foreignKey: 'id_vendedor',
-    as: 'pedidos'
-  });
-
-  Usuario.hasMany(MovimientoStock, {
-    foreignKey: 'id_usuario',
-    as: 'movimientosStock'
-  });
+    console.log('✅ Asociaciones configuradas correctamente');
+  } catch (error) {
+    console.error('❌ Error configurando asociaciones:', error);
+    throw error;
+  }
 }
 
-// ✅ FUNCIÓN PARA OBTENER INCLUDES COMUNES
+// ===============================
+// INCLUDES HELPER FUNCTIONS
+// ===============================
+
 export const getProductoCompleteInclude = () => [
   {
     model: Categoria,
@@ -197,6 +347,12 @@ export const getDetallePedidoCompleteInclude = () => [
             as: 'categoria'
           }
         ]
+      },
+      {
+        model: ModalidadProducto,
+        as: 'modalidades',
+        where: { activa: true },
+        required: false
       }
     ]
   },
@@ -220,5 +376,10 @@ export const getPedidoCompleteInclude = () => [
   {
     model: Usuario,
     as: 'vendedor'
+  },
+  {
+    model: Cliente,
+    as: 'cliente',
+    required: false
   }
 ];

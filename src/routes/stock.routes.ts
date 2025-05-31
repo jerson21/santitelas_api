@@ -197,8 +197,9 @@ router.get('/bodega/:bodegaId', async (req, res, next) => {
       total_productos: stockBodega.length,
       productos_con_stock: stockBodega.filter(s => s.cantidad_disponible > 0).length,
       productos_sin_stock: stockBodega.filter(s => s.cantidad_disponible === 0).length,
+      // ✅ CORREGIDO: precio_costo_base en lugar de precio_costo
       valor_total_inventario: stockBodega.reduce((total, stock) =>
-        total + (stock.cantidad_disponible * (stock.varianteProducto?.producto?.precio_costo ?? 0)), 0
+        total + (stock.cantidad_disponible * (stock.varianteProducto?.producto?.precio_costo_base ?? 0)), 0
       )
     };
 

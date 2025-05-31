@@ -1,4 +1,4 @@
-﻿// src/models/DetallePedido.model.ts - VERIFICADO PARA NUEVA BD
+﻿// src/models/DetallePedido.model.ts - ERRORES TS CORREGIDOS
 import { 
   Table, 
   Column, 
@@ -37,7 +37,6 @@ export class DetallePedido extends Model {
   })
   id_pedido!: number;
 
-  // ✅ CORRECTO: Necesitamos ambos campos para la nueva estructura
   @ForeignKey(() => VarianteProducto)
   @Column({
     type: DataType.INTEGER,
@@ -98,16 +97,13 @@ export class DetallePedido extends Model {
   })
   fecha_creacion!: Date;
 
-  // ✅ RELACIONES CORRECTAS
+  // RELACIONES
   pedido!: Pedido;
-
   varianteProducto!: VarianteProducto;
-
   modalidad!: ModalidadProducto;
-
   usuarioAutorizador?: Usuario;
 
-  // ✅ MÉTODOS ACTUALIZADOS
+  // MÉTODOS
   calcularSubtotal(): number {
     return Math.round(this.cantidad * this.precio_unitario);
   }
@@ -159,6 +155,7 @@ export class DetallePedido extends Model {
     return { valido: true };
   }
 
+  // ✅ CORREGIDO: Consistencia en nombres de propiedades
   validarModalidad(): { valido: boolean; mensaje?: string } {
     if (!this.modalidad) {
       return { valido: false, mensaje: 'Modalidad no encontrada' };
@@ -179,13 +176,16 @@ export class DetallePedido extends Model {
     // Validar cantidad según modalidad
     const validacionCantidad = this.modalidad.validarCantidad(this.cantidad);
     if (!validacionCantidad.valida) {
-      return validacionCantidad;
+      // ✅ CORREGIDO: Mapear valida → valido
+      return {
+        valido: false,
+        mensaje: validacionCantidad.mensaje
+      };
     }
 
     return { valido: true };
   }
 
-  // ✅ NUEVOS MÉTODOS PARA LA NUEVA ESTRUCTURA
   validarCompleto(): { valido: boolean; errores: string[] } {
     const errores: string[] = [];
 
@@ -239,7 +239,6 @@ export class DetallePedido extends Model {
     };
   }
 
-  // ✅ MÉTODOS ESTÁTICOS ÚTILES
   static async crearDetalle(datos: {
     id_pedido: number;
     id_variante_producto: number;

@@ -72,48 +72,48 @@ router.use(auth);
  *               stock_minimo:
  *                 type: number
  *                 example: 10
- *         modalidades:
- *           type: array
- *           description: "Modalidades de venta a nivel de producto"
- *           items:
- *             type: object
- *             required:
- *               - nombre
- *               - precio_neto
- *               - precio_factura
- *             properties:
- *               nombre:
- *                 type: string
- *                 example: "METRO"
- *                 description: "METRO, ROLLO, KILO, UNIDAD, EMBALAJE, etc."
- *               descripcion:
- *                 type: string
- *                 example: "Venta por metro lineal"
- *               cantidad_base:
- *                 type: number
- *                 example: 1
- *               es_cantidad_variable:
- *                 type: boolean
- *                 example: true
- *               minimo_cantidad:
- *                 type: number
- *                 example: 0.5
- *               precio_costo:
- *                 type: number
- *                 example: 5000
- *               precio_neto:
- *                 type: number
- *                 example: 8500
- *               precio_factura:
- *                 type: number
- *                 example: 8000
+ *               modalidades:
+ *                 type: array
+ *                 description: "Modalidades específicas para esta variante"
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - nombre
+ *                     - precio_neto
+ *                     - precio_factura
+ *                   properties:
+ *                     nombre:
+ *                       type: string
+ *                       example: "METRO"
+ *                       description: "METRO, ROLLO, KILO, UNIDAD, EMBALAJE, etc."
+ *                     descripcion:
+ *                       type: string
+ *                       example: "Venta por metro lineal"
+ *                     cantidad_base:
+ *                       type: number
+ *                       example: 1
+ *                     es_cantidad_variable:
+ *                       type: boolean
+ *                       example: true
+ *                     minimo_cantidad:
+ *                       type: number
+ *                       example: 0.5
+ *                     precio_costo:
+ *                       type: number
+ *                       example: 5000
+ *                     precio_neto:
+ *                       type: number
+ *                       example: 8500
+ *                     precio_factura:
+ *                       type: number
+ *                       example: 8000
  */
 
 /**
  * @openapi
  * /productos-admin:
  *   post:
- *     summary: Crear producto completo con variantes y modalidades (modalidades a nivel de producto)
+ *     summary: Crear producto completo con variantes y modalidades (modalidades por variante)
  *     tags:
  *       - productos-admin
  *     security:
@@ -143,8 +143,7 @@ router.post('/', async (req, res, next) => {
       descripcion,
       unidad_medida = 'unidad',
       stock_minimo_total = 0,
-      opciones = [],
-      modalidades = []
+      opciones = []
     } = req.body;
 
     // Validaciones básicas
@@ -215,11 +214,21 @@ router.post('/', async (req, res, next) => {
       activo: true
     }, { transaction });
 
-    // Crear variantes (si se envían)
+    // ✅ CREAR VARIANTES CON SUS MODALIDADES ESPECÍFICAS
     let totalVariantes = 0;
-    if (Array.isArray(opciones)) {
+    let totalModalidades = 0;
+    
+    if (Array.isArray(opciones) && opciones.length > 0) {
       for (const opcion of opciones) {
-        const { color, medida, material, descripcion: descVariante, stock_minimo = 0 } = opcion;
+        const { 
+          color, 
+          medida, 
+          material, 
+          descripcion: descVariante, 
+          stock_minimo = 0,
+          modalidades: modalidadesVariante = []
+        } = opcion;
+        
         // Generar SKU único
         const skuParts = [
           codigoFinal,
@@ -234,7 +243,8 @@ router.post('/', async (req, res, next) => {
           sku = `${skuBase}-${contador}`;
           contador++;
         }
-        await VarianteProducto.create({
+        
+        const variante = await VarianteProducto.create({
           id_producto: producto.id_producto,
           sku,
           color,
@@ -244,41 +254,86 @@ router.post('/', async (req, res, next) => {
           stock_minimo,
           activo: true
         }, { transaction });
+        
         totalVariantes++;
-      }
-    }
 
-    // Crear modalidades a nivel de producto
-    let totalModalidades = 0;
-    if (Array.isArray(modalidades)) {
-      for (const modalidad of modalidades) {
-        const {
-          nombre,
-          descripcion: descModalidad,
-          cantidad_base = 1,
-          es_cantidad_variable = false,
-          minimo_cantidad = 0,
-          precio_costo = 0,
-          precio_neto,
-          precio_factura
-        } = modalidad;
-        if (!nombre || !precio_neto || !precio_factura) {
-          await transaction.rollback();
-          return res.status(400).json({
-            success: false,
-            message: 'Cada modalidad debe tener nombre, precio_neto y precio_factura'
-          });
+        // ✅ CREAR MODALIDADES PARA ESTA VARIANTE ESPECÍFICA
+        if (Array.isArray(modalidadesVariante)) {
+          for (const modalidad of modalidadesVariante) {
+            const {
+              nombre,
+              descripcion: descModalidad,
+              cantidad_base = 1,
+              es_cantidad_variable = false,
+              minimo_cantidad = 0,
+              precio_costo = 0,
+              precio_neto,
+              precio_factura
+            } = modalidad;
+            
+            if (!nombre || !precio_neto || !precio_factura) {
+              await transaction.rollback();
+              return res.status(400).json({
+                success: false,
+                message: `Cada modalidad debe tener nombre, precio_neto y precio_factura. Error en variante: ${sku}`
+              });
+            }
+            
+            await ModalidadProducto.create({
+              id_variante_producto: variante.id_variante_producto,
+              nombre: nombre.toUpperCase(),
+              descripcion: descModalidad,
+              cantidad_base,
+              es_cantidad_variable,
+              minimo_cantidad,
+              precio_costo,
+              precio_neto,
+              precio_neto_factura: precio_factura,
+              activa: true
+            }, { transaction });
+            
+            totalModalidades++;
+          }
         }
+      }
+    } else {
+      // Si no se envían opciones, crear una variante estándar
+      const variante = await VarianteProducto.create({
+        id_producto: producto.id_producto,
+        sku: `${codigoFinal}-STD`,
+        descripcion: 'Variante estándar',
+        stock_minimo: 0,
+        activo: true
+      }, { transaction });
+      
+      totalVariantes++;
+
+      // Modalidades automáticas según unidad de medida
+      if (unidad_medida === 'metro') {
         await ModalidadProducto.create({
-          id_producto: producto.id_producto,
-          nombre: nombre.toUpperCase(),
-          descripcion: descModalidad,
-          cantidad_base,
-          es_cantidad_variable,
-          minimo_cantidad,
-          precio_costo,
-          precio_neto,
-          precio_neto_factura: precio_factura,
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'METRO',
+          descripcion: 'Venta por metro',
+          cantidad_base: 1,
+          es_cantidad_variable: true,
+          minimo_cantidad: 0.1,
+          precio_costo: 0,
+          precio_neto: 1000,
+          precio_neto_factura: 840,
+          activa: true
+        }, { transaction });
+        totalModalidades++;
+      } else {
+        await ModalidadProducto.create({
+          id_variante_producto: variante.id_variante_producto,
+          nombre: 'UNIDAD',
+          descripcion: 'Venta por unidad',
+          cantidad_base: 1,
+          es_cantidad_variable: false,
+          minimo_cantidad: 1,
+          precio_costo: 0,
+          precio_neto: 1000,
+          precio_neto_factura: 840,
           activa: true
         }, { transaction });
         totalModalidades++;
@@ -309,9 +364,9 @@ router.post('/', async (req, res, next) => {
 
 /**
  * @openapi
- * /productos-admin/{id}/modalidad:
+ * /productos-admin/{id}/variante/{varianteId}/modalidad:
  *   post:
- *     summary: Agregar modalidad a un producto existente
+ *     summary: Agregar modalidad a una variante específica
  *     tags:
  *       - productos-admin
  *     security:
@@ -319,6 +374,11 @@ router.post('/', async (req, res, next) => {
  *     parameters:
  *       - in: path
  *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: varianteId
  *         required: true
  *         schema:
  *           type: integer
@@ -353,11 +413,11 @@ router.post('/', async (req, res, next) => {
  *       '201':
  *         description: Modalidad agregada exitosamente
  *       '404':
- *         description: Producto no encontrado
+ *         description: Producto o variante no encontrado
  */
-router.post('/:id/modalidad', async (req, res, next) => {
+router.post('/:id/variante/:varianteId/modalidad', async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const { id, varianteId } = req.params;
     const {
       nombre,
       descripcion,
@@ -369,11 +429,27 @@ router.post('/:id/modalidad', async (req, res, next) => {
       precio_factura
     } = req.body;
 
+    // Verificar que el producto existe
     const producto = await Producto.findByPk(id);
     if (!producto) {
       return res.status(404).json({
         success: false,
         message: 'Producto no encontrado'
+      });
+    }
+
+    // Verificar que la variante existe y pertenece al producto
+    const variante = await VarianteProducto.findOne({
+      where: {
+        id_variante_producto: varianteId,
+        id_producto: id
+      }
+    });
+    
+    if (!variante) {
+      return res.status(404).json({
+        success: false,
+        message: 'Variante no encontrada o no pertenece al producto'
       });
     }
 
@@ -384,8 +460,9 @@ router.post('/:id/modalidad', async (req, res, next) => {
       });
     }
 
+    // ✅ CREAR MODALIDAD PARA LA VARIANTE ESPECÍFICA
     const modalidad = await ModalidadProducto.create({
-      id_producto: producto.id_producto,
+      id_variante_producto: variante.id_variante_producto,
       nombre: nombre.toUpperCase(),
       descripcion,
       cantidad_base,
@@ -400,7 +477,7 @@ router.post('/:id/modalidad', async (req, res, next) => {
     res.status(201).json({
       success: true,
       data: modalidad,
-      message: 'Modalidad agregada exitosamente al producto'
+      message: 'Modalidad agregada exitosamente a la variante'
     });
 
   } catch (error) {
@@ -440,6 +517,19 @@ router.post('/:id/modalidad', async (req, res, next) => {
  *                 type: string
  *               stock_minimo:
  *                 type: number
+ *               modalidades:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     nombre:
+ *                       type: string
+ *                     descripcion:
+ *                       type: string
+ *                     precio_neto:
+ *                       type: number
+ *                     precio_factura:
+ *                       type: number
  *     responses:
  *       '201':
  *         description: Variante agregada exitosamente
@@ -447,9 +537,17 @@ router.post('/:id/modalidad', async (req, res, next) => {
  *         description: Producto no encontrado
  */
 router.post('/:id/variante', async (req, res, next) => {
+  const transaction = await sequelize.transaction();
   try {
     const { id } = req.params;
-    const { color, medida, material, descripcion, stock_minimo = 0 } = req.body;
+    const { 
+      color, 
+      medida, 
+      material, 
+      descripcion, 
+      stock_minimo = 0,
+      modalidades = []
+    } = req.body;
 
     const producto = await Producto.findByPk(id);
     if (!producto) {
@@ -469,7 +567,7 @@ router.post('/:id/variante', async (req, res, next) => {
     const skuBase = skuParts.join('-');
     let sku = skuBase;
     let contador = 1;
-    while (await VarianteProducto.findOne({ where: { sku } })) {
+    while (await VarianteProducto.findOne({ where: { sku }, transaction })) {
       sku = `${skuBase}-${contador}`;
       contador++;
     }
@@ -483,18 +581,55 @@ router.post('/:id/variante', async (req, res, next) => {
       descripcion,
       stock_minimo,
       activo: true
-    });
+    }, { transaction });
+
+    // ✅ CREAR MODALIDADES PARA LA NUEVA VARIANTE
+    let totalModalidades = 0;
+    if (Array.isArray(modalidades)) {
+      for (const modalidad of modalidades) {
+        const {
+          nombre,
+          descripcion: descModalidad,
+          cantidad_base = 1,
+          es_cantidad_variable = false,
+          minimo_cantidad = 0,
+          precio_costo = 0,
+          precio_neto,
+          precio_factura
+        } = modalidad;
+        
+        if (nombre && precio_neto && precio_factura) {
+          await ModalidadProducto.create({
+            id_variante_producto: variante.id_variante_producto,
+            nombre: nombre.toUpperCase(),
+            descripcion: descModalidad,
+            cantidad_base,
+            es_cantidad_variable,
+            minimo_cantidad,
+            precio_costo,
+            precio_neto,
+            precio_neto_factura: precio_factura,
+            activa: true
+          }, { transaction });
+          totalModalidades++;
+        }
+      }
+    }
+
+    await transaction.commit();
 
     res.status(201).json({
       success: true,
       data: {
         id_variante: variante.id_variante_producto,
-        sku: variante.sku
+        sku: variante.sku,
+        modalidades_creadas: totalModalidades
       },
-      message: `Variante agregada exitosamente`
+      message: `Variante agregada exitosamente con ${totalModalidades} modalidades`
     });
 
   } catch (error) {
+    await transaction.rollback();
     next(error);
   }
 });

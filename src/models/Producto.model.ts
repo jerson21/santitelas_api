@@ -72,7 +72,7 @@ export class Producto extends Model {
   })
   unidad_medida!: string;
 
-  // ✅ NUEVOS CAMPOS PARA PLANTILLAS DE PRECIOS
+  // ✅ PLANTILLAS DE PRECIOS (OPCIONALES - para herencia a variantes)
   @Column({ 
     type: DataType.DECIMAL(10, 0), 
     defaultValue: 0 
@@ -109,7 +109,7 @@ export class Producto extends Model {
   })
   fecha_actualizacion!: Date;
 
-  // ✅ RELACIONES CORREGIDAS
+  // ✅ RELACIONES CORRECTAS
   categoria!: Categoria;
 
   variantes!: VarianteProducto[];
@@ -241,7 +241,7 @@ export class Producto extends Model {
     };
   }
 
-  // ✅ NUEVOS MÉTODOS PARA PLANTILLAS DE PRECIOS
+  // ✅ PLANTILLAS DE PRECIOS (para herencia a nuevas variantes)
   getPlantillaPrecios(): {
     precio_costo_base: number;
     precio_neto_base: number;
@@ -294,5 +294,135 @@ export class Producto extends Model {
     });
 
     return modalidades;
+  }
+
+  // ✅ MÉTODO PARA OBTENER DATOS COMPLETOS CON VARIANTES Y MODALIDADES
+  getDatosCompletos(): any {
+    return {
+      id_producto: this.id_producto,
+      codigo: this.codigo,
+      nombre: this.nombre,
+      descripcion: this.descripcion,
+      tipo: this.tipo,
+      unidad_medida: this.unidad_medida,
+      stock_minimo_total: this.stock_minimo_total,
+      descripcion_completa: this.getDescripcionCompleta(),
+      variantes: this.getVariantesActivas().map(variante => variante.getDatosCompletos()),
+      estadisticas: this.getEstadisticas(),
+      plantilla_precios: this.getPlantillaPrecios(),
+      categoria: this.categoria ? {
+        id_categoria: this.categoria.id_categoria,
+        nombre: this.categoria.nombre
+      } : null
+    };
+  }
+
+  // ✅ MÉTODOS DE VALIDACIÓN
+  validar(): { valido: boolean; errores: string[] } {
+    const errores: string[] = [];
+
+    if (!this.codigo || this.codigo.trim() === '') {
+      errores.push('El código del producto es requerido');
+    }
+
+    if (!this.nombre || this.nombre.trim() === '') {
+      errores.push('El nombre del producto es requerido');
+    }
+
+    if (!this.id_categoria) {
+      errores.push('La categoría es requerida');
+    }
+
+    if (this.stock_minimo_total < 0) {
+      errores.push('El stock mínimo no puede ser negativo');
+    }
+
+    return {
+      valido: errores.length === 0,
+      errores
+    };
+  }
+
+  // ✅ MÉTODO PARA CREAR VARIANTE CON MODALIDADES AUTOMÁTICAS
+  async crearVarianteConModalidades(datosVariante: {
+    color?: string;
+    medida?: string;
+    material?: string;
+    descripcion?: string;
+    stock_minimo?: number;
+  }): Promise<VarianteProducto> {
+    // Generar SKU único
+    const skuParts = [
+      this.codigo,
+      datosVariante.color?.substring(0, 3).toUpperCase(),
+      datosVariante.medida,
+      datosVariante.material?.substring(0, 3).toUpperCase()
+    ].filter(Boolean);
+    const skuBase = skuParts.join('-');
+    
+    // Verificar unicidad del SKU
+    let sku = skuBase;
+    let contador = 1;
+    while (await VarianteProducto.findOne({ where: { sku } })) {
+      sku = `${skuBase}-${contador}`;
+      contador++;
+    }
+
+    // Crear la variante
+    const variante = await VarianteProducto.create({
+      id_producto: this.id_producto,
+      sku,
+      color: datosVariante.color,
+      medida: datosVariante.medida,
+      material: datosVariante.material,
+      descripcion: datosVariante.descripcion,
+      stock_minimo: datosVariante.stock_minimo || 0,
+      activo: true
+    });
+
+    // Crear modalidades automáticas basadas en la unidad de medida
+    const plantilla = this.getPlantillaPrecios();
+    
+    if (this.unidad_medida === 'metro') {
+      // Para productos en metros: METRO y ROLLO
+      await variante.$create('modalidad', {
+        nombre: 'METRO',
+        descripcion: 'Venta al corte por metro',
+        cantidad_base: 1,
+        es_cantidad_variable: true,
+        minimo_cantidad: 0.1,
+        precio_costo: plantilla.precio_costo_base,
+        precio_neto: plantilla.precio_neto_base,
+        precio_neto_factura: plantilla.precio_neto_factura_base,
+        activa: true
+      });
+
+      await variante.$create('modalidad', {
+        nombre: 'ROLLO',
+        descripcion: 'Rollo completo',
+        cantidad_base: 25,
+        es_cantidad_variable: false,
+        minimo_cantidad: 25,
+        precio_costo: Math.round(plantilla.precio_costo_base * 0.9),
+        precio_neto: Math.round(plantilla.precio_neto_base * 0.9),
+        precio_neto_factura: Math.round(plantilla.precio_neto_factura_base * 0.9),
+        activa: true
+      });
+    } else {
+      // Para otros productos: UNIDAD
+      await variante.$create('modalidad', {
+        nombre: 'UNIDAD',
+        descripcion: 'Venta por unidad',
+        cantidad_base: 1,
+        es_cantidad_variable: false,
+        minimo_cantidad: 1,
+        precio_costo: plantilla.precio_costo_base,
+        precio_neto: plantilla.precio_neto_base,
+        precio_neto_factura: plantilla.precio_neto_factura_base,
+        activa: true
+      });
+    }
+
+    return variante;
   }
 }
