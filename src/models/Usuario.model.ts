@@ -29,7 +29,7 @@ export class Usuario extends Model {
   @Column({
     type: DataType.STRING(50),
     allowNull: false,
-    unique: true
+    unique: 'unq_usuarios_usuario'
   })
   usuario!: string;
 
@@ -47,7 +47,7 @@ export class Usuario extends Model {
 
   @Column({
     type: DataType.STRING(100),
-    unique: true
+    unique: 'unq_usuarios_email'
   })
   email?: string;
 

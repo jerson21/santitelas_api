@@ -141,10 +141,17 @@ async function initializeDatabase() {
     setupAssociations();
     console.log('✅ Asociaciones configuradas');
     
-    // Sincronizar con alter para ajustar esquema
+    // Sincronizar esquema de base de datos
     console.log('🔄 Sincronizando esquema de base de datos...');
-    await sequelize.sync({ alter: true });
-    console.log('✅ Base de datos sincronizada (esquema ajustado)');
+    if (process.env.SEED_DATABASE === 'true') {
+      console.log('🗑️  SEED_DATABASE=true: eliminando y recreando tablas (force sync)...');
+      await sequelize.sync({ force: true });
+      console.log('✅ Tablas recreadas fresh (force sync)');
+    } else {
+      console.log('⚙️  Ajustando esquema con alter...');
+      await sequelize.sync({ alter: true });
+      console.log('✅ Base de datos sincronizada (esquema ajustado)');
+    }
 
     // Sembrar datos iniciales si SEED_DATABASE=true
     if (process.env.SEED_DATABASE === 'true') {
