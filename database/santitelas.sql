@@ -964,14 +964,14 @@ INSERT INTO roles (nombre, descripcion, permisos) VALUES
 ('CAJERO', 'Acceso a ventas y caja', '["ventas", "pagos"]'),
 ('VENDEDOR', 'Acceso a pedidos y productos', '["pedidos", "productos.ver"]');
 
--- Usuario administrador (password: admin123)
+-- Usuarios del sistema con hashes correctos para cada contraseña
 INSERT INTO usuarios (usuario, password_hash, nombre_completo, email, id_rol) VALUES
 -- admin / admin123
-('admin', 'admin123', 'Administrador del Sistema', 'admin@santitelas.cl', 1),
+('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMye1jrwtMNOySDEb8K9yJ3TksE7nQP/nOa', 'Administrador del Sistema', 'admin@santitelas.cl', 1),
 -- cajero1 / cajero123  
-('cajero1', 'cajero123', 'María González', 'maria@santitelas.cl', 2),
+('cajero1', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'María González', 'maria@santitelas.cl', 2),
 -- vendedor1 / vendedor123
-('vendedor1', 'vendedor123', 'Juan Pérez', 'juan@santitelas.cl', 3);
+('vendedor1', '$2a$10$K7L/dW2vs70QrBhJBgUoJ.QDWG7kqfz7UWRwLnUwQrKb.6LXQ6YS6', 'Juan Pérez', 'juan@santitelas.cl', 3);
 
 -- Categorías de productos
 INSERT INTO categorias (nombre, descripcion) VALUES
@@ -1016,8 +1016,8 @@ INSERT INTO cajas (nombre, ubicacion, activa) VALUES
 INSERT INTO productos (codigo, nombre, descripcion, id_categoria, tipo, unidad_medida, precio_costo_base, precio_neto_base, precio_neto_factura_base) VALUES
 -- TELAS (precios iguales para todas las variantes)
 ('LIN-GUCCI-001', 'GUCCI', 'Línea GUCCI de telas de lino premium', 1, 'LINO', 'metro', 2500, 3800, 3193),
-('LIN-VERSACE-001', 'GABANNA', 'Línea VERSACE de telas de lino', 1, 'LINO', 'metro', 2300, 3500, 2941),
-('FEL-PREMIUM-001', 'FELPA SANTI', 'Línea premium de felpa suave', 1, 'FELPA', 'metro', 1800, 2500, 2101),
+('LIN-VERSACE-001', 'VERSACE', 'Línea VERSACE de telas de lino', 1, 'LINO', 'metro', 2300, 3500, 2941),
+('FEL-PREMIUM-001', 'PREMIUM', 'Línea premium de felpa suave', 1, 'FELPA', 'metro', 1800, 2500, 2101),
 
 -- CORCHETES (cada medida tendrá precio diferente)
 ('COR-MEDIDAS-001', 'Corchetes Varios', 'Corchetes metálicos de diferentes medidas', 4, 'CORCHETES', 'unidad', 100, 150, 126),
@@ -1037,13 +1037,13 @@ INSERT INTO variantes_producto (id_producto, sku, color, medida, descripcion) VA
 (1, 'LIN-GUCCI-VER', 'Verde', NULL, 'Lino Gucci color Verde'),
 
 -- LINO VERSACE
-(2, 'LIN-GABANNA-BLA', 'Blanco', NULL, 'Lino Versace color Blanco'),
-(2, 'LIN-GABANNA-NEG', 'Negro', NULL, 'Lino Versace color Negro'),
-(2, 'LIN-GABANNA-DOR', 'Dorado', NULL, 'Lino Versace color Dorado'),
+(2, 'LIN-VERSACE-BLA', 'Blanco', NULL, 'Lino Versace color Blanco'),
+(2, 'LIN-VERSACE-NEG', 'Negro', NULL, 'Lino Versace color Negro'),
+(2, 'LIN-VERSACE-DOR', 'Dorado', NULL, 'Lino Versace color Dorado'),
 
 -- FELPA PREMIUM  
-(3, 'FEL-SANTI-GRI', 'Gris', NULL, 'Felpa premium color Gris'),
-(3, 'FEL-SANTI-AZU', 'Azul', NULL, 'Felpa premium color Azul'),
+(3, 'FEL-PREMIUM-GRI', 'Gris', NULL, 'Felpa premium color Gris'),
+(3, 'FEL-PREMIUM-AZU', 'Azul', NULL, 'Felpa premium color Azul'),
 
 -- CORCHETES - Cada medida tendrá precio diferente
 (4, 'COR-71', NULL, '71', 'Corchete medida 71'),

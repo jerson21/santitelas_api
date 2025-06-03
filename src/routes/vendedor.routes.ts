@@ -850,4 +850,401 @@ router.get('/estadisticas-dia', async (req, res, next) => {
   }
 });
 
+/**
+ * @openapi
+ * /vendedor/pedido-rapido:
+ *   post:
+ *     summary: Crear un vale/pedido rápido para procesar en caja
+ *     tags:
+ *       - vendedor
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               tipo_documento:
+ *                 type: string
+ *                 enum: [ticket, boleta, factura]
+ *               detalles:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     id_variante_producto:
+ *                       type: integer
+ *                     id_modalidad:
+ *                       type: integer
+ *                     cantidad:
+ *                       type: number
+ *                     precio_unitario:
+ *                       type: number
+ *                     observaciones:
+ *                       type: string
+ *     responses:
+ *       '201':
+ *         description: Vale creado exitosamente
+ */
+router.post('/pedido-rapido', async (req, res, next) => {
+  const sequelize = Usuario.sequelize;
+  let transaction;
+  
+  try {
+    transaction = await sequelize!.transaction();
+    
+    const { tipo_documento, detalles } = req.body;
+    const vendedorId = req.user?.id;
+
+    console.log('📝 Creando pedido rápido:', { 
+      tipo_documento, 
+      detalles: detalles?.length, 
+      vendedor: req.user?.username 
+    });
+
+    // Validaciones básicas
+    if (!tipo_documento || !detalles || !Array.isArray(detalles) || detalles.length === 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Tipo de documento y detalles son requeridos'
+      });
+    }
+
+    if (!['ticket', 'boleta', 'factura'].includes(tipo_documento)) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Tipo de documento inválido'
+      });
+    }
+
+    // Validar estructura de cada detalle
+    for (let i = 0; i < detalles.length; i++) {
+      const detalle = detalles[i];
+      
+      if (!detalle.id_variante_producto || !detalle.id_modalidad || 
+          !detalle.cantidad || !detalle.precio_unitario) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Detalle ${i + 1}: Todos los campos son requeridos`
+        });
+      }
+
+      if (detalle.cantidad <= 0 || detalle.precio_unitario <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Detalle ${i + 1}: Cantidad y precio deben ser mayores a 0`
+        });
+      }
+    }
+
+    // Generar número de pedido único
+    const fechaHoy = new Date();
+    const year = fechaHoy.getFullYear().toString().slice(-2);
+    const month = (fechaHoy.getMonth() + 1).toString().padStart(2, '0');
+    const day = fechaHoy.getDate().toString().padStart(2, '0');
+    const random = Math.floor(Math.random() * 9999).toString().padStart(4, '0');
+    const numeroPedido = `VP${year}${month}${day}${random}`;
+
+    console.log('🏷️ Número de pedido generado:', numeroPedido);
+
+    // Validar que todas las variantes y modalidades existan
+    for (let i = 0; i < detalles.length; i++) {
+      const detalle = detalles[i];
+      
+      const variante = await VarianteProducto.findByPk(detalle.id_variante_producto, {
+        include: [{
+          model: Producto,
+          as: 'producto',
+          attributes: ['nombre', 'codigo', 'activo']
+        }],
+        transaction
+      });
+
+      if (!variante || !variante.activo) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Detalle ${i + 1}: Variante no encontrada o inactiva`
+        });
+      }
+
+      const modalidad = await ModalidadProducto.findOne({
+        where: {
+          id_modalidad: detalle.id_modalidad,
+          id_variante_producto: detalle.id_variante_producto,
+          activa: true
+        },
+        transaction
+      });
+
+      if (!modalidad) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Detalle ${i + 1}: Modalidad no encontrada para esta variante`
+        });
+      }
+
+      console.log(`✅ Validado detalle ${i + 1}: ${variante.producto?.nombre} - ${modalidad.nombre}`);
+    }
+
+    // Calcular totales
+    const subtotal = detalles.reduce((sum, detalle) => 
+      sum + (Number(detalle.cantidad) * Number(detalle.precio_unitario)), 0
+    );
+
+    console.log('💰 Subtotal calculado:', subtotal);
+
+    // Crear pedido principal
+    const nuevoPedido = await Pedido.create({
+      numero_pedido: numeroPedido,
+      id_vendedor: vendedorId,
+      tipo_documento,
+      estado: 'vale_pendiente',
+      subtotal: subtotal,
+      total: subtotal,
+      datos_completos: tipo_documento !== 'factura',
+      observaciones: `Vale creado por vendedor ${req.user?.username} desde dashboard`,
+      fecha_creacion: new Date(),
+      fecha_actualizacion: new Date()
+    }, { transaction });
+
+    console.log('📄 Pedido creado:', nuevoPedido.id_pedido, nuevoPedido.numero_pedido);
+
+    // Crear detalles del pedido
+    const detallesCreados = [];
+    for (let i = 0; i < detalles.length; i++) {
+      const detalle = detalles[i];
+      
+      const detalleCreado = await DetallePedido.crearDetalle({
+        id_pedido: nuevoPedido.id_pedido,
+        id_variante_producto: detalle.id_variante_producto,
+        id_modalidad: detalle.id_modalidad,
+        cantidad: Number(detalle.cantidad),
+        precio_unitario: Number(detalle.precio_unitario),
+        tipo_precio: 'neto',
+        observaciones: detalle.observaciones || ''
+      });
+
+      detallesCreados.push(detalleCreado);
+      console.log(`📦 Detalle ${i + 1} creado:`, detalleCreado.id_detalle);
+    }
+
+    // Confirmar transacción
+    await transaction.commit();
+    console.log('✅ Transacción confirmada - Vale creado exitosamente');
+
+    // Respuesta al frontend
+    res.status(201).json({
+      success: true,
+      data: {
+        id_pedido: nuevoPedido.id_pedido,
+        numero_pedido: nuevoPedido.numero_pedido,
+        estado: nuevoPedido.estado,
+        tipo_documento: nuevoPedido.tipo_documento,
+        subtotal: nuevoPedido.subtotal,
+        total: nuevoPedido.total,
+        fecha_creacion: nuevoPedido.fecha_creacion,
+        detalles_count: detallesCreados.length,
+        vendedor: req.user?.username
+      },
+      message: `Vale ${nuevoPedido.numero_pedido} creado exitosamente`
+    });
+
+    console.log(`🎯 VALE CREADO: ${numeroPedido} por ${req.user?.username}`);
+
+  } catch (error) {
+    if (transaction) await transaction.rollback();
+    console.error('❌ Error creando pedido rápido:', error);
+    
+    if ((error as any).name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Error: Número de pedido duplicado. Intente nuevamente.'
+      });
+    }
+
+    if ((error as any).name === 'SequelizeForeignKeyConstraintError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Error: Referencia inválida en los datos del pedido.'
+      });
+    }
+    
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /vendedor/mis-vales:
+ *   get:
+ *     summary: Listar vales/pedidos creados por el vendedor
+ *     tags:
+ *       - vendedor
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/mis-vales', async (req, res, next) => {
+  try {
+    const { estado, fecha_desde, limit = 20 } = req.query;
+    const vendedorId = req.user?.id;
+
+    const whereConditions: any = {
+      id_vendedor: vendedorId,
+      estado: { [Op.in]: ['vale_pendiente', 'procesando_caja', 'completado', 'cancelado'] }
+    };
+
+    if (estado) {
+      whereConditions.estado = estado;
+    }
+
+    if (fecha_desde) {
+      whereConditions.fecha_creacion = {
+        [Op.gte]: new Date(fecha_desde as string)
+      };
+    }
+
+    const pedidos = await Pedido.findAll({
+      where: whereConditions,
+      include: [{
+        model: DetallePedido,
+        as: 'detalles',
+        include: [{
+          model: VarianteProducto,
+          as: 'varianteProducto',
+          include: [{
+            model: Producto,
+            as: 'producto',
+            attributes: ['nombre', 'codigo']
+          }]
+        }]
+      }],
+      order: [['fecha_creacion', 'DESC']],
+      limit: Number(limit)
+    });
+
+    const valesFormateados = pedidos.map(pedido => ({
+      id_pedido: pedido.id_pedido,
+      numero_pedido: pedido.numero_pedido,
+      estado: pedido.estado,
+      estado_descripcion: (pedido as any).getEstadoDescripcion(),
+      tipo_documento: pedido.tipo_documento,
+      total: pedido.total,
+      fecha_creacion: pedido.fecha_creacion,
+      total_productos: pedido.detalles?.length || 0
+    }));
+
+    res.json({
+      success: true,
+      data: valesFormateados,
+      total: valesFormateados.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo vales del vendedor:', error);
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /vendedor/vale/{numero_pedido}:
+ *   get:
+ *     summary: Obtener detalles completos de un vale específico
+ *     tags:
+ *       - vendedor
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/vale/:numero_pedido', async (req, res, next) => {
+  try {
+    const { numero_pedido } = req.params;
+    const vendedorId = req.user?.id;
+
+    const pedido = await Pedido.findOne({
+      where: {
+        numero_pedido,
+        id_vendedor: vendedorId
+      },
+      include: [{
+        model: DetallePedido,
+        as: 'detalles',
+        include: [{
+          model: VarianteProducto,
+          as: 'varianteProducto',
+          include: [{
+            model: Producto,
+            as: 'producto'
+          }]
+        }, {
+          model: ModalidadProducto,
+          as: 'modalidad'
+        }]
+      }, {
+        model: Usuario,
+        as: 'vendedor',
+        attributes: ['usuario', 'nombre_completo']
+      }]
+    });
+
+    if (!pedido) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vale no encontrado'
+      });
+    }
+
+    const valeDetallado = {
+      id_pedido: pedido.id_pedido,
+      numero_pedido: pedido.numero_pedido,
+      estado: pedido.estado,
+      tipo_documento: pedido.tipo_documento,
+      subtotal: pedido.subtotal,
+      total: pedido.total,
+      fecha_creacion: pedido.fecha_creacion,
+      observaciones: pedido.observaciones,
+      vendedor: {
+        usuario: (pedido.vendedor as any)?.usuario,
+        nombre: (pedido.vendedor as any)?.nombre_completo || 'Vendedor'
+      },
+      detalles: pedido.detalles?.map(detalle => ({
+        id_detalle: detalle.id_detalle,
+        producto: {
+          nombre: detalle.varianteProducto?.producto?.nombre,
+          codigo: detalle.varianteProducto?.producto?.codigo
+        },
+        variante: {
+          sku: detalle.varianteProducto?.sku,
+          color: detalle.varianteProducto?.color,
+          medida: detalle.varianteProducto?.medida,
+          material: detalle.varianteProducto?.material
+        },
+        modalidad: {
+          nombre: detalle.modalidad?.nombre,
+          descripcion: detalle.modalidad?.descripcion
+        },
+        cantidad: detalle.cantidad,
+        precio_unitario: detalle.precio_unitario,
+        subtotal: detalle.subtotal,
+        observaciones: detalle.observaciones
+      })) || []
+    };
+
+    res.json({
+      success: true,
+      data: valeDetallado
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo vale:', error);
+    next(error);
+  }
+});
 export default router;
