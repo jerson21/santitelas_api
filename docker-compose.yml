@@ -15,7 +15,7 @@ services:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./database:/docker-entrypoint-initdb.d
+      - ./database:/docker-entrypoint-initdb.d  # ✅ Tu archivo SQL se ejecutará aquí
     networks:
       - santitelas-network
     command: >
@@ -74,8 +74,16 @@ services:
       # Frontend URLs
       FRONTEND_URL: http://localhost:3000,http://localhost:3001
       
-      # Seeder
-      SEED_DATABASE: true
+      # ✅ NUEVAS VARIABLES PARA CONTROL GRANULAR DEL SEEDING
+      # Opciones:
+      # SEED_DATABASE=fresh      -> Recrear TODO desde cero (solo primera vez)
+      SEED_DATABASE: true    #   -> Solo actualizar contraseñas (mantener datos)
+      # UPDATE_PASSWORDS=true    -> Solo actualizar contraseñas (mantener datos)
+      # (sin variable)           -> Solo sincronizar esquema
+      
+      # ✅ CAMBIAR ESTA LÍNEA SEGÚN TU NECESIDAD:
+      # SEED_DATABASE: fresh           # 🗑️ Primera vez: crear todo
+     # UPDATE_PASSWORDS: true                # 🔑 Subsecuentes: solo contraseñas
       
     ports:
       - "5000:5000"

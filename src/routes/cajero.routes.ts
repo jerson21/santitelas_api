@@ -13,6 +13,8 @@ import { TipoDocumento } from '../models/TipoDocumento.model';
 import { TurnoCaja } from '../models/TurnoCaja.model';
 import { ArqueoCaja } from '../models/ArqueoCaja.model';
 import { Pago } from '../models/Pago.model';
+import { Caja } from '../models/Caja.model';
+
 import { MetodoPago } from '../models/MetodoPago.model';
 import { Op, Transaction } from 'sequelize';
 import { sequelize } from '../config/database';
@@ -1068,6 +1070,276 @@ router.get('/ultimo-arqueo', async (req: Request, res: Response, next: NextFunct
             'Arqueo reciente - Todo en orden'
       }
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /cajero/vale/{numeroVale}:
+ *   get:
+ *     summary: Obtener información básica de un vale
+ *     tags:
+ *       - Cajero
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: numeroVale
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Número del vale
+ *     responses:
+ *       200:
+ *         description: Información básica del vale
+ *       404:
+ *         description: Vale no encontrado
+ */
+router.get('/vale/:numeroVale', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { numeroVale } = req.params;
+    
+    const vale = await Pedido.findOne({
+      where: { numero_pedido: numeroVale },
+      include: [
+        { 
+          model: Usuario, 
+          as: 'vendedor', 
+          attributes: ['usuario', 'nombre_completo'] 
+        },
+        { 
+          model: Cliente, 
+          as: 'cliente', 
+          attributes: ['nombre', 'rut', 'razon_social', 'telefono', 'email', 'direccion'],
+          required: false 
+        },
+        {
+          model: DetallePedido,
+          as: 'detalles',
+          include: [
+            {
+              model: VarianteProducto,
+              as: 'varianteProducto',
+              include: [{
+                model: Producto,
+                as: 'producto',
+                attributes: ['nombre', 'codigo', 'unidad_medida']
+              }]
+            },
+            {
+              model: ModalidadProducto,
+              as: 'modalidad',
+              attributes: ['nombre', 'descripcion'],
+              required: false
+            }
+          ]
+        }
+      ]
+    });
+    
+    if (!vale) {
+      return res.status(404).json({
+        success: false,
+        message: `Vale ${numeroVale} no encontrado`
+      });
+    }
+    
+    // Formatear respuesta básica para compatibilidad con frontend
+    const valeFormateado = {
+      numero_cliente: vale.numero_pedido,
+      numero: vale.numero_pedido,
+      cliente_nombre: vale.cliente?.nombre || vale.cliente?.razon_social || 'Cliente sin datos',
+      vendedor_nombre: vale.vendedor?.nombre_completo || vale.vendedor?.usuario,
+      fecha: vale.fecha_creacion,
+      total: vale.total,
+      monto_total: vale.total,
+      estado: vale.estado,
+      productos: vale.detalles?.map(detalle => ({
+        nombre: detalle.varianteProducto?.producto?.nombre || 'Producto',
+        descripcion: detalle.varianteProducto?.color && detalle.varianteProducto?.medida 
+                    ? `${detalle.varianteProducto.color} ${detalle.varianteProducto.medida}`.trim()
+                    : detalle.varianteProducto?.color || detalle.varianteProducto?.medida || '',
+        cantidad: detalle.cantidad,
+        precio: detalle.precio_unitario,
+        total: detalle.subtotal,
+        unidad_medida: detalle.varianteProducto?.producto?.unidad_medida || ''
+      })) || [],
+      cliente: vale.cliente?.nombre || vale.cliente?.razon_social || 'Cliente sin datos',
+      vendedor: vale.vendedor?.nombre_completo || vale.vendedor?.usuario,
+      items: vale.detalles?.map(detalle => ({
+        nombre: detalle.varianteProducto?.producto?.nombre || 'Producto',
+        descripcion: detalle.varianteProducto?.color && detalle.varianteProducto?.medida 
+                    ? `${detalle.varianteProducto.color} ${detalle.varianteProducto.medida}`.trim()
+                    : detalle.varianteProducto?.color || detalle.varianteProducto?.medida || '',
+        cantidad: detalle.cantidad,
+        precio: detalle.precio_unitario,
+        total: detalle.subtotal
+      })) || []
+    };
+    
+    res.json({ 
+      success: true, 
+      data: valeFormateado 
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /cajero/estadisticas:
+ *   get:
+ *     summary: Obtener estadísticas del cajero para el dashboard
+ *     tags:
+ *       - Cajero
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: fecha
+ *         required: false
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Fecha específica (por defecto hoy)
+ *     responses:
+ *       200:
+ *         description: Estadísticas del cajero
+ */
+router.get('/estadisticas', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Corregir el type casting para query parameters
+    const fechaParam = req.query.fecha;
+    const fecha = typeof fechaParam === 'string' ? fechaParam : new Date().toISOString().split('T')[0];
+    
+    // Obtener vales del día
+    const inicioFecha = new Date(`${fecha}T00:00:00.000Z`);
+    const finFecha = new Date(`${fecha}T23:59:59.999Z`);
+    
+    const valesDelDia = await Pedido.findAll({
+      where: {
+        fecha_creacion: { [Op.between]: [inicioFecha, finFecha] }
+      },
+      attributes: ['estado', 'total']
+    });
+    
+    // Obtener vales pendientes históricos
+    const fechaLimite = new Date();
+    fechaLimite.setDate(fechaLimite.getDate() - 7);
+    
+    // Corregir el where para vales pendientes históricos
+    const whereHistoricos: any = {
+      fecha_creacion: { [Op.gte]: fechaLimite }
+    };
+    whereHistoricos.estado = { [Op.in]: ['vale_pendiente', 'procesando_caja'] };
+    
+    const valesPendientesHistoricos = await Pedido.findAll({
+      where: whereHistoricos,
+      attributes: ['fecha_creacion', 'total']
+    });
+    
+    // Calcular estadísticas del día actual
+    const estadisticasDia = {
+      fecha: fecha,
+      total_vales: valesDelDia.length,
+      pendientes: valesDelDia.filter(v => v.estado === 'vale_pendiente').length,
+      procesando: valesDelDia.filter(v => v.estado === 'procesando_caja').length,
+      monto_total: valesDelDia
+        .filter(v => v.estado === 'completado')
+        .reduce((sum, v) => sum + Number(v.total), 0)
+    };
+    
+    // Calcular estadísticas de pendientes históricos
+    const fechasUnicas = new Set(
+      valesPendientesHistoricos.map(v => 
+        new Date(v.fecha_creacion).toDateString()
+      )
+    );
+    
+    const estadisticasHistoricas = {
+      total: valesPendientesHistoricos.length,
+      monto_total: valesPendientesHistoricos.reduce((sum, v) => sum + Number(v.total), 0),
+      dias_con_pendientes: fechasUnicas.size
+    };
+    
+    const estadisticas = {
+      dia_actual: estadisticasDia,
+      pendientes_historicos: estadisticasHistoricas
+    };
+    
+    res.json({
+      success: true,
+      data: estadisticas
+    });
+    
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /cajero/estado-turno:
+ *   get:
+ *     summary: Verificar estado actual del turno de caja
+ *     tags:
+ *       - Cajero
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Estado del turno actual
+ */
+router.get('/estado-turno', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id_cajero = (req as any).user?.id_usuario;
+    
+    const turnoActivo = await TurnoCaja.findOne({
+      where: { 
+        id_cajero, 
+        estado: 'abierto' 
+      },
+      include: [
+        {
+          model: Caja,
+          as: 'caja',
+          attributes: ['nombre', 'ubicacion']
+        }
+      ]
+    });
+    
+    if (turnoActivo) {
+      // Calcular estadísticas del turno
+      const tiempoAbierto = Math.floor(
+        (new Date().getTime() - new Date(turnoActivo.fecha_apertura).getTime()) / 60000
+      );
+      
+      res.json({
+        success: true,
+        data: {
+          turno_abierto: true,
+          id_turno: turnoActivo.id_turno,
+          fecha_apertura: turnoActivo.fecha_apertura,
+          monto_inicial: turnoActivo.monto_inicial,
+          tiempo_abierto_minutos: tiempoAbierto,
+          caja: (turnoActivo as any).caja?.nombre || 'Caja Principal',
+          total_ventas: turnoActivo.total_ventas || 0,
+          cantidad_ventas: turnoActivo.cantidad_ventas || 0
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        data: {
+          turno_abierto: false,
+          mensaje: 'No hay turno de caja abierto'
+        }
+      });
+    }
+    
   } catch (error) {
     next(error);
   }

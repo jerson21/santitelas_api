@@ -1,4 +1,4 @@
-﻿// src/models/index.ts - ASOCIACIONES CORREGIDAS PARA NUEVA BD
+﻿// src/models/index.ts - CORREGIDO PARA HOOKS
 import { sequelize } from '../config/database';
 
 // Importar modelos completos
@@ -31,14 +31,33 @@ export {
 
 export async function initializeModels() {
   try {
-    // Primero registrar todos los modelos
+    console.log('📊 Registrando modelos en Sequelize...');
+    
+    // ✅ CORREGIDO: Registrar todos los modelos ANTES de cualquier operación
     sequelize.addModels([
       Rol, Usuario, Categoria, Producto, VarianteProducto, ModalidadProducto,
       Cliente, TipoDocumento, Bodega, StockPorBodega, Pedido, DetallePedido,
       MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock
     ]);
 
-    console.log('📊 Modelos registrados:', Object.keys(sequelize.models).join(', '));
+    // ✅ VERIFICAR que los modelos se registraron correctamente
+    const registeredModels = Object.keys(sequelize.models);
+    console.log('📋 Modelos registrados:', registeredModels.join(', '));
+    
+    // ✅ VERIFICAR modelo Usuario específicamente (importante para hooks)
+    if (sequelize.models.Usuario) {
+      console.log('✅ Modelo Usuario registrado correctamente');
+      
+      // ✅ VERIFICAR que los hooks están definidos
+      const usuarioModel = sequelize.models.Usuario as any;
+      if (usuarioModel.options?.hooks) {
+        console.log('✅ Hooks detectados en modelo Usuario');
+      } else {
+        console.log('⚠️  No se detectaron hooks en modelo Usuario');
+      }
+    } else {
+      throw new Error('❌ Modelo Usuario no se registró correctamente');
+    }
     
     return true;
   } catch (error) {
@@ -47,7 +66,7 @@ export async function initializeModels() {
   }
 }
 
-// ✅ ASOCIACIONES CORREGIDAS PARA NUEVA BD
+// ✅ ASOCIACIONES SIN CAMBIOS (están bien)
 export function setupAssociations() {
   try {
     console.log('🔗 Configurando asociaciones para nueva estructura BD...');

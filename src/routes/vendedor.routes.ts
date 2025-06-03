@@ -1,4 +1,4 @@
-// src/routes/vendedor.routes.ts - VERSIÓN CORREGIDA
+// routes/vendedor.routes.ts - VERSIÓN CORREGIDA CON NUMERACIÓN DIARIA
 import { Router } from 'express';
 import { auth } from '../middlewares/auth';
 import { Producto } from '../models/Producto.model';
@@ -8,6 +8,11 @@ import { Categoria } from '../models/Categoria.model';
 import { StockPorBodega } from '../models/StockPorBodega.model';
 import { Bodega } from '../models/Bodega.model';
 import { Op } from 'sequelize';
+import { Usuario } from '../models/Usuario.model';
+import { Pedido } from '../models/Pedido.model';
+import { DetallePedido } from '../models/DetallePedido.model';
+import { sequelize } from '../config/database';
+import { QueryTypes } from 'sequelize';
 
 const router = Router();
 router.use(auth);
@@ -21,36 +26,6 @@ router.use(auth);
  *       - vendedor
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: categoria
- *         schema:
- *           type: string
- *         description: Filtrar por categoría
- *       - in: query
- *         name: tipo
- *         schema:
- *           type: string
- *         description: Filtrar por tipo de producto
- *       - in: query
- *         name: search
- *         schema:
- *           type: string
- *         description: Búsqueda por nombre o código
- *       - in: query
- *         name: con_stock
- *         schema:
- *           type: boolean
- *           default: true
- *         description: Solo productos con stock
- *       - in: query
- *         name: bodega_id
- *         schema:
- *           type: integer
- *         description: Stock en bodega específica
- *     responses:
- *       '200':
- *         description: Lista de productos para venta
  */
 router.get('/productos', async (req, res, next) => {
   try {
@@ -61,7 +36,6 @@ router.get('/productos', async (req, res, next) => {
     const whereStock: any = {};
     
     if (categoria) {
-      // Filtrar por categoría usando el ID en lugar del nombre
       const catId = Number(categoria);
       if (!isNaN(catId)) {
         whereProducto.id_categoria = catId;
@@ -83,7 +57,7 @@ router.get('/productos', async (req, res, next) => {
       whereStock.cantidad_disponible = { [Op.gt]: 0 };
     }
 
-    // ✅ CONSULTA CORREGIDA: Modalidades desde variantes
+    // ✅ CONSULTA OPTIMIZADA: Modalidades desde variantes
     const productos = await Producto.findAll({
       where: whereProducto,
       include: [
@@ -99,7 +73,6 @@ router.get('/productos', async (req, res, next) => {
           required: false,
           include: [
             {
-              // ✅ MODALIDADES DESDE VARIANTES
               model: ModalidadProducto,
               as: 'modalidades',
               where: { activa: true },
@@ -107,7 +80,7 @@ router.get('/productos', async (req, res, next) => {
               attributes: [
                 'id_modalidad', 'nombre', 'descripcion', 'cantidad_base',
                 'es_cantidad_variable', 'minimo_cantidad', 'precio_neto',
-                'precio_neto_factura'
+                'precio_neto_factura', 'precio_costo'
               ]
             },
             {
@@ -131,7 +104,7 @@ router.get('/productos', async (req, res, next) => {
       ]
     });
 
-    // ✅ PROCESAMIENTO CORREGIDO: Obtener modalidades desde variantes
+    // ✅ PROCESAMIENTO MEJORADO: Obtener modalidades desde variantes
     const productosVendedor = productos.map(producto => {
       // Calcular stock total de todas las variantes
       const stockTotal = producto.variantes?.reduce((total: number, variante: any) => {
@@ -185,7 +158,6 @@ router.get('/productos', async (req, res, next) => {
             : `$${precioMinimo.toLocaleString('es-CL')} - $${precioMaximo.toLocaleString('es-CL')}`
         },
         total_variantes: variantesConStock.length,
-        // ✅ MODALIDADES ÚNICAS (sin duplicados por variante)
         modalidades_disponibles: getModalidadesUnicas(todasModalidades),
         variantes: variantesConStock.map(variante => ({
           id_variante: variante.id_variante_producto,
@@ -261,21 +233,6 @@ function getModalidadesUnicas(modalidades: any[]): any[] {
  * /vendedor/producto/{id}:
  *   get:
  *     summary: Obtener detalles completos de un producto para venta
- *     tags:
- *       - vendedor
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       '200':
- *         description: Detalles completos del producto
- *       '404':
- *         description: Producto no encontrado
  */
 router.get('/producto/:id', async (req, res, next) => {
   try {
@@ -287,7 +244,6 @@ router.get('/producto/:id', async (req, res, next) => {
       whereStock.id_bodega = bodega_id;
     }
 
-    // ✅ CONSULTA CORREGIDA: Modalidades desde variantes
     const producto = await Producto.findByPk(id, {
       include: [
         {
@@ -356,7 +312,6 @@ router.get('/producto/:id', async (req, res, next) => {
       stock_total: stockTotal,
       tiene_stock: stockTotal > 0,
       stock_minimo: producto.stock_minimo_total,
-      // ✅ MODALIDADES ÚNICAS DESDE VARIANTES
       modalidades: getModalidadesUnicas(todasModalidades).map((modalidad: any) => ({
         nombre: modalidad.nombre,
         descripcion: modalidad.descripcion,
@@ -422,30 +377,6 @@ router.get('/producto/:id', async (req, res, next) => {
  * /vendedor/buscar:
  *   get:
  *     summary: Búsqueda rápida de productos para vendedor
- *     tags:
- *       - vendedor
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: q
- *         required: true
- *         schema:
- *           type: string
- *         description: Término de búsqueda (código, nombre, SKU)
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 10
- *       - in: query
- *         name: solo_con_stock
- *         schema:
- *           type: boolean
- *           default: true
- *     responses:
- *       '200':
- *         description: Resultados de búsqueda rápida
  */
 router.get('/buscar', async (req, res, next) => {
   try {
@@ -463,7 +394,6 @@ router.get('/buscar', async (req, res, next) => {
       whereStock.cantidad_disponible = { [Op.gt]: 0 };
     }
 
-    // ✅ CONSULTA CORREGIDA: Modalidades desde variantes
     const productos = await Producto.findAll({
       where: {
         [Op.and]: [
@@ -560,21 +490,6 @@ router.get('/buscar', async (req, res, next) => {
  * /vendedor/stock/{productoId}:
  *   get:
  *     summary: Consultar stock detallado de un producto
- *     tags:
- *       - vendedor
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: productoId
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       '200':
- *         description: Stock detallado del producto
- *       '404':
- *         description: Producto no encontrado
  */
 router.get('/stock/:productoId', async (req, res, next) => {
   try {
@@ -674,13 +589,6 @@ router.get('/stock/:productoId', async (req, res, next) => {
  * /vendedor/categorias:
  *   get:
  *     summary: Listar categorías disponibles para filtros
- *     tags:
- *       - vendedor
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       '200':
- *         description: Lista de categorías con contadores
  */
 router.get('/categorias', async (req, res, next) => {
   try {
@@ -715,6 +623,229 @@ router.get('/categorias', async (req, res, next) => {
     });
 
   } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /vendedor/pedido-rapido:
+ *   post:
+ *     summary: Crear pedido rápido (vale) con numeración diaria
+ */
+router.post('/pedido-rapido', async (req, res, next) => {
+  const { tipo_documento, detalles } = req.body;
+
+  try {
+    // ✅ 1) VALIDACIONES BÁSICAS FUERA DE LA TRANSACCIÓN
+    if (!tipo_documento || !Array.isArray(detalles) || detalles.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tipo de documento y lista de detalles son requeridos.'
+      });
+    }
+
+    if (!['ticket', 'boleta', 'factura'].includes(tipo_documento)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tipo de documento inválido. Debe ser: ticket, boleta o factura.'
+      });
+    }
+
+    // Validar cada detalle
+    let subtotalTotal = 0;
+    for (let i = 0; i < detalles.length; i++) {
+      const det = detalles[i];
+
+      if (
+        typeof det.id_variante_producto !== 'number' ||
+        typeof det.id_modalidad !== 'number' ||
+        typeof det.cantidad !== 'number' ||
+        typeof det.precio_unitario !== 'number'
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: `Detalle ${i + 1}: Todos los campos (id_variante_producto, id_modalidad, cantidad, precio_unitario) deben ser números válidos.`
+        });
+      }
+
+      if (det.cantidad <= 0 || det.precio_unitario <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Detalle ${i + 1}: Cantidad y precio unitario deben ser mayores a 0.`
+        });
+      }
+
+      // Verificar que la variante existe y está activa
+      const variante = await VarianteProducto.findByPk(det.id_variante_producto, {
+        include: [{ model: Producto, as: 'producto', attributes: ['activo', 'nombre'] }]
+      });
+      if (!variante || !variante.activo || !variante.producto || !variante.producto.activo) {
+        return res.status(400).json({
+          success: false,
+          message: `Detalle ${i + 1}: Variante ${det.id_variante_producto} o su producto asociado no existe o está inactivo.`
+        });
+      }
+
+      // Verificar que la modalidad existe, está activa y pertenece a la variante
+      const modalidad = await ModalidadProducto.findOne({
+        where: {
+          id_modalidad: det.id_modalidad,
+          id_variante_producto: det.id_variante_producto,
+          activa: true
+        }
+      });
+      if (!modalidad) {
+        return res.status(400).json({
+          success: false,
+          message: `Detalle ${i + 1}: Modalidad ${det.id_modalidad} no existe, no pertenece a la variante ${det.id_variante_producto} o está inactiva.`
+        });
+      }
+
+      subtotalTotal += det.cantidad * det.precio_unitario;
+    }
+
+    // ✅ 2) INICIAR TRANSACCIÓN PARA ESCRITURAS
+    const transaction = await sequelize.transaction();
+    try {
+      // ✅ USAR PROCEDIMIENTOS ALMACENADOS PARA GENERAR NÚMEROS
+      const [resultado]: any = await sequelize.query(
+        'SELECT generar_numero_pedido_simple() as numero_completo, obtener_proximo_numero_diario() as numero_diario',
+        {
+          type: QueryTypes.SELECT,
+          transaction
+        }
+      );
+
+      const numeroCompleto = resultado.numero_completo;
+      const numeroDiario = resultado.numero_diario;
+
+      console.log('🎯 Números generados por procedimientos:', { numeroCompleto, numeroDiario });
+
+      // ✅ 3) CREAR EL PEDIDO PRINCIPAL
+      const nuevoPedido = await Pedido.create(
+        {
+          numero_pedido: numeroCompleto,
+          numero_diario: numeroDiario,
+          id_vendedor: req.user!.id,
+          tipo_documento,
+          estado: 'vale_pendiente',
+          subtotal: subtotalTotal,
+          total: subtotalTotal,
+          datos_completos: tipo_documento !== 'factura',
+          observaciones: `Vale #${numeroDiario} creado por ${req.user!.username}`,
+          fecha_creacion: new Date(),
+          fecha_actualizacion: new Date()
+        },
+        { transaction }
+      );
+
+      // ✅ 4) INSERTAR DETALLES
+      const detallesParaInsertar = detalles.map((det) => ({
+        id_pedido: nuevoPedido.id_pedido,
+        id_variante_producto: det.id_variante_producto,
+        id_modalidad: det.id_modalidad,
+        cantidad: det.cantidad,
+        precio_unitario: det.precio_unitario,
+        subtotal: Math.round(det.cantidad * det.precio_unitario),
+        observaciones: det.observaciones || '',
+        fecha_creacion: new Date()
+      }));
+
+      await DetallePedido.bulkCreate(detallesParaInsertar, { transaction });
+
+      // ✅ 5) COMMIT
+      await transaction.commit();
+
+      // ✅ 6) RESPUESTA CON DATOS PARA EL MODAL
+      return res.status(201).json({
+        success: true,
+        data: {
+          id_pedido: nuevoPedido.id_pedido,
+          numero_pedido: nuevoPedido.numero_pedido,
+          numero_diario: nuevoPedido.numero_diario,
+          estado: nuevoPedido.estado,
+          tipo_documento: nuevoPedido.tipo_documento,
+          subtotal: nuevoPedido.subtotal,
+          total: nuevoPedido.total,
+          fecha_creacion: nuevoPedido.fecha_creacion,
+          detalles_count: detallesParaInsertar.length
+        },
+        message: `Vale #${nuevoPedido.numero_diario} creado exitosamente.`
+      });
+
+    } catch (errTransaction) {
+      await transaction.rollback();
+      console.error('❌ Error en transacción:', errTransaction);
+      return res.status(500).json({
+        success: false,
+        message: 'No se pudo guardar el pedido. Intente nuevamente.'
+      });
+    }
+
+  } catch (errValidaciones) {
+    console.error('❌ Error en validaciones:', errValidaciones);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Error interno al procesar el pedido.' 
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /vendedor/estadisticas-dia:
+ *   get:
+ *     summary: Obtener estadísticas del día para el vendedor
+ */
+router.get('/estadisticas-dia', async (req, res, next) => {
+  try {
+    const { fecha } = req.query;
+    const fechaConsulta = fecha ? new Date(fecha as string) : new Date();
+    
+    // ✅ CONSULTA OPTIMIZADA PARA ESTADÍSTICAS DEL DÍA
+    const [estadisticas]: any = await sequelize.query(
+      `SELECT 
+        DATE(fecha_creacion) as fecha,
+        COUNT(*) as total_vales,
+        MAX(numero_diario) as ultimo_numero,
+        MIN(numero_diario) as primer_numero,
+        SUM(total) as monto_total,
+        COUNT(CASE WHEN estado = 'vale_pendiente' THEN 1 END) as pendientes,
+        COUNT(CASE WHEN estado = 'completado' THEN 1 END) as completados
+      FROM pedidos 
+      WHERE DATE(fecha_creacion) = DATE(?)
+      GROUP BY DATE(fecha_creacion)`,
+      {
+        replacements: [fechaConsulta],
+        type: QueryTypes.SELECT
+      }
+    );
+
+    const resultado = estadisticas || {
+      fecha: fechaConsulta.toISOString().split('T')[0],
+      total_vales: 0,
+      ultimo_numero: 0,
+      primer_numero: 0,
+      monto_total: 0,
+      pendientes: 0,
+      completados: 0
+    };
+
+    res.json({
+      success: true,
+      data: {
+        ...resultado,
+        fecha_formateada: fechaConsulta.toLocaleDateString('es-CL', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        })
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en estadísticas del día:', error);
     next(error);
   }
 });

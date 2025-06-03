@@ -1,7 +1,7 @@
 -- ==========================================================
 -- SANTITELAS - SISTEMA DE PUNTO DE VENTA
 -- Base de datos completa organizada y optimizada
--- VERSIÓN ACTUALIZADA: MODALIDADES POR VARIANTE
+-- VERSIÓN CORREGIDA PARA MySQL 8.0 - SIN ERRORES DE SINTAXIS
 -- ==========================================================
 
 CREATE DATABASE IF NOT EXISTS santitelas;
@@ -41,6 +41,8 @@ DROP FUNCTION IF EXISTS obtener_precio_modalidad;
 DROP FUNCTION IF EXISTS calcular_stock_total_variante;
 DROP FUNCTION IF EXISTS obtener_stock_en_bodega;
 DROP FUNCTION IF EXISTS generar_numero_pedido;
+DROP FUNCTION IF EXISTS generar_numero_pedido_simple;
+DROP FUNCTION IF EXISTS obtener_proximo_numero_diario;
 DROP FUNCTION IF EXISTS generar_numero_venta;
 
 -- Limpiar vistas existentes
@@ -315,13 +317,18 @@ CREATE TABLE clientes (
 );
 
 -- ==========================================================
--- 4. GESTIÓN DE PEDIDOS Y VENTAS
+-- 4. GESTIÓN DE PEDIDOS Y VENTAS CON NUMERACIÓN DIARIA
 -- ==========================================================
 
--- Pedidos (preventa/cotización)
+-- Pedidos (preventa/cotización) - ✅ CON NUMERACIÓN DIARIA CORREGIDA
 CREATE TABLE pedidos (
     id_pedido INT PRIMARY KEY AUTO_INCREMENT,
     numero_pedido VARCHAR(20) NOT NULL UNIQUE,
+    
+    -- ✅ CAMPO CLAVE: Número secuencial diario generado por procedimiento
+    numero_diario INT NOT NULL DEFAULT 1 
+    COMMENT 'Número secuencial del día (1, 2, 3...) generado por procedimiento almacenado',
+    
     id_vendedor INT NOT NULL,
     id_cliente INT NULL,
     
@@ -353,11 +360,14 @@ CREATE TABLE pedidos (
     FOREIGN KEY (id_cliente) REFERENCES clientes(id_cliente),
     
     INDEX idx_numero_pedido (numero_pedido),
+    INDEX idx_numero_diario (numero_diario),
     INDEX idx_vendedor (id_vendedor),
     INDEX idx_cliente (id_cliente),
     INDEX idx_estado (estado),
     INDEX idx_fecha_creacion (fecha_creacion),
-    INDEX idx_tipo_documento (tipo_documento)
+    INDEX idx_tipo_documento (tipo_documento),
+    -- ✅ ÍNDICE CORREGIDO PARA MySQL 8.0 - SIN FUNCIÓN DATE()
+    INDEX idx_fecha_numero_diario (fecha_creacion, numero_diario)
 );
 
 -- Detalle de pedidos
@@ -527,12 +537,77 @@ CREATE TABLE pagos (
 );
 
 -- ==========================================================
--- 7. FUNCIONES ÚTILES ACTUALIZADAS
+-- 7. FUNCIONES PARA NUMERACIÓN DIARIA - ✅ CORREGIDAS
 -- ==========================================================
 
-DELIMITER //
+DELIMITER $$
 
--- Función: Crear modalidades automáticamente para nueva variante (MEJORADA)
+-- ✅ FUNCIÓN PRINCIPAL: Obtener próximo número diario
+CREATE FUNCTION obtener_proximo_numero_diario() 
+RETURNS INT
+READS SQL DATA
+DETERMINISTIC
+BEGIN
+    DECLARE v_numero_diario INT DEFAULT 1;
+    
+    SELECT COALESCE(MAX(numero_diario), 0) + 1
+    INTO v_numero_diario
+    FROM pedidos 
+    WHERE DATE(fecha_creacion) = CURDATE();
+    
+    RETURN v_numero_diario;
+END$$
+
+-- ✅ FUNCIÓN: Generar número completo de pedido
+CREATE FUNCTION generar_numero_pedido_simple() 
+RETURNS VARCHAR(20)
+READS SQL DATA
+DETERMINISTIC
+BEGIN
+    DECLARE v_numero_diario INT DEFAULT 1;
+    DECLARE v_fecha VARCHAR(8);
+    DECLARE v_numero_completo VARCHAR(20);
+    
+    SET v_fecha = DATE_FORMAT(NOW(), '%Y%m%d');
+    
+    -- Buscar último número del día
+    SELECT COALESCE(MAX(numero_diario), 0) + 1
+    INTO v_numero_diario
+    FROM pedidos 
+    WHERE DATE(fecha_creacion) = CURDATE();
+    
+    SET v_numero_completo = CONCAT('VP', v_fecha, '-', LPAD(v_numero_diario, 4, '0'));
+    
+    RETURN v_numero_completo;
+END$$
+
+-- ✅ FUNCIÓN: Generar número de venta (para cuando se complete el pago)
+CREATE FUNCTION generar_numero_venta() 
+RETURNS VARCHAR(20)
+READS SQL DATA
+DETERMINISTIC
+BEGIN
+    DECLARE v_numero INT DEFAULT 1;
+    DECLARE v_fecha VARCHAR(8);
+    DECLARE v_numero_completo VARCHAR(20);
+    
+    SET v_fecha = DATE_FORMAT(NOW(), '%Y%m%d');
+    
+    SELECT COALESCE(MAX(CAST(SUBSTRING(numero_venta, 10) AS UNSIGNED)), 0) + 1
+    INTO v_numero
+    FROM ventas 
+    WHERE numero_venta LIKE CONCAT('VT', v_fecha, '-%');
+    
+    SET v_numero_completo = CONCAT('VT', v_fecha, '-', LPAD(v_numero, 4, '0'));
+    
+    RETURN v_numero_completo;
+END$$
+
+-- ==========================================================
+-- 8. OTRAS FUNCIONES ÚTILES
+-- ==========================================================
+
+-- Función: Crear modalidades automáticamente para nueva variante
 CREATE PROCEDURE crear_modalidades_para_variante(
     IN p_id_variante_producto INT
 )
@@ -583,7 +658,7 @@ BEGIN
             VALUES (p_id_variante_producto, 'UNIDAD', 'Venta por unidad', 1, FALSE, 1, v_precio_costo_base, v_precio_neto_base, v_precio_neto_factura_base);
         END IF;
     END IF;
-END//
+END$$
 
 -- Función: Obtener precio según modalidad y tipo de documento
 CREATE FUNCTION obtener_precio_modalidad(
@@ -609,7 +684,7 @@ BEGIN
     END IF;
     
     RETURN COALESCE(v_precio, 0);
-END//
+END$$
 
 -- Función: Calcular stock total de una variante
 CREATE FUNCTION calcular_stock_total_variante(p_id_variante_producto INT)
@@ -624,29 +699,7 @@ BEGIN
     WHERE id_variante_producto = p_id_variante_producto;
     
     RETURN v_stock_total;
-END//
-
--- Función: Generar número de pedido automático
-CREATE FUNCTION generar_numero_pedido() 
-RETURNS VARCHAR(20)
-READS SQL DATA
-DETERMINISTIC
-BEGIN
-    DECLARE v_numero INT DEFAULT 1;
-    DECLARE v_fecha VARCHAR(8);
-    DECLARE v_numero_completo VARCHAR(20);
-    
-    SET v_fecha = DATE_FORMAT(NOW(), '%Y%m%d');
-    
-    SELECT COALESCE(MAX(CAST(SUBSTRING(numero_pedido, 10) AS UNSIGNED)), 0) + 1
-    INTO v_numero
-    FROM pedidos 
-    WHERE numero_pedido LIKE CONCAT(v_fecha, '-%');
-    
-    SET v_numero_completo = CONCAT(v_fecha, '-', LPAD(v_numero, 4, '0'));
-    
-    RETURN v_numero_completo;
-END//
+END$$
 
 -- Función: Obtener stock en bodega específica
 CREATE FUNCTION obtener_stock_en_bodega(
@@ -665,48 +718,25 @@ BEGIN
     AND id_bodega = p_id_bodega;
     
     RETURN v_stock;
-END//
-
--- Función: Generar número de venta automático
-CREATE FUNCTION generar_numero_venta() 
-RETURNS VARCHAR(20)
-READS SQL DATA
-DETERMINISTIC
-BEGIN
-    DECLARE v_numero INT DEFAULT 1;
-    DECLARE v_fecha VARCHAR(8);
-    DECLARE v_numero_completo VARCHAR(20);
-    
-    SET v_fecha = DATE_FORMAT(NOW(), '%Y%m%d');
-    
-    SELECT COALESCE(MAX(CAST(SUBSTRING(numero_venta, 10) AS UNSIGNED)), 0) + 1
-    INTO v_numero
-    FROM ventas 
-    WHERE numero_venta LIKE CONCAT(v_fecha, '-%');
-    
-    SET v_numero_completo = CONCAT(v_fecha, '-', LPAD(v_numero, 4, '0'));
-    
-    RETURN v_numero_completo;
-END//
+END$$
 
 DELIMITER ;
 
 -- ==========================================================
--- 8. TRIGGERS ACTUALIZADOS
+-- 9. TRIGGERS PARA AUTOMATIZACIÓN
 -- ==========================================================
 
-DELIMITER //
+DELIMITER $$
 
--- Trigger: Crear modalidades automáticamente al crear variante (CON VALIDACIONES)
+-- Trigger: Crear modalidades automáticamente al crear variante
 CREATE TRIGGER tr_crear_modalidades_variante
     AFTER INSERT ON variantes_producto
     FOR EACH ROW
 BEGIN
-    -- Solo crear modalidades si no existen ya
     IF (SELECT COUNT(*) FROM modalidades_producto WHERE id_variante_producto = NEW.id_variante_producto) = 0 THEN
         CALL crear_modalidades_para_variante(NEW.id_variante_producto);
     END IF;
-END//
+END$$
 
 -- Trigger: Validar modalidad-variante y calcular subtotal
 CREATE TRIGGER tr_detalle_pedidos_validacion
@@ -715,7 +745,6 @@ CREATE TRIGGER tr_detalle_pedidos_validacion
 BEGIN
     DECLARE v_count INT DEFAULT 0;
     
-    -- Validar que la modalidad pertenezca a la variante seleccionada
     SELECT COUNT(*) INTO v_count
     FROM modalidades_producto mp
     WHERE mp.id_modalidad = NEW.id_modalidad
@@ -727,9 +756,8 @@ BEGIN
         SET MESSAGE_TEXT = 'La modalidad seleccionada no pertenece a la variante del producto';
     END IF;
     
-    -- Calcular subtotal
     SET NEW.subtotal = ROUND(NEW.cantidad * NEW.precio_unitario, 0);
-END//
+END$$
 
 CREATE TRIGGER tr_detalle_pedidos_validacion_update
     BEFORE UPDATE ON detalle_pedidos
@@ -737,7 +765,6 @@ CREATE TRIGGER tr_detalle_pedidos_validacion_update
 BEGIN
     DECLARE v_count INT DEFAULT 0;
     
-    -- Validar que la modalidad pertenezca a la variante seleccionada
     SELECT COUNT(*) INTO v_count
     FROM modalidades_producto mp
     WHERE mp.id_modalidad = NEW.id_modalidad
@@ -749,12 +776,11 @@ BEGIN
         SET MESSAGE_TEXT = 'La modalidad seleccionada no pertenece a la variante del producto';
     END IF;
     
-    -- Calcular subtotal
     SET NEW.subtotal = ROUND(NEW.cantidad * NEW.precio_unitario, 0);
-END//
+END$$
 
--- Trigger: Actualizar totales del pedido cuando se agrega detalle
-CREATE TRIGGER actualizar_totales_pedido
+-- Triggers para actualizar totales del pedido
+CREATE TRIGGER actualizar_totales_pedido_insert
     AFTER INSERT ON detalle_pedidos
     FOR EACH ROW
 BEGIN
@@ -767,9 +793,8 @@ BEGIN
     total = subtotal - descuento,
     fecha_actualizacion = NOW()
     WHERE id_pedido = NEW.id_pedido;
-END//
+END$$
 
--- Trigger: Actualizar totales del pedido cuando se actualiza detalle
 CREATE TRIGGER actualizar_totales_pedido_update
     AFTER UPDATE ON detalle_pedidos
     FOR EACH ROW
@@ -783,9 +808,8 @@ BEGIN
     total = subtotal - descuento,
     fecha_actualizacion = NOW()
     WHERE id_pedido = NEW.id_pedido;
-END//
+END$$
 
--- Trigger: Actualizar totales del pedido cuando se elimina detalle
 CREATE TRIGGER actualizar_totales_pedido_delete
     AFTER DELETE ON detalle_pedidos
     FOR EACH ROW
@@ -799,7 +823,7 @@ BEGIN
     total = subtotal - descuento,
     fecha_actualizacion = NOW()
     WHERE id_pedido = OLD.id_pedido;
-END//
+END$$
 
 -- Trigger: Actualizar totales del turno cuando se crea una venta
 CREATE TRIGGER actualizar_totales_turno_venta
@@ -810,7 +834,7 @@ BEGIN
     SET total_ventas = total_ventas + NEW.total,
         cantidad_ventas = cantidad_ventas + 1
     WHERE id_turno = NEW.id_turno;
-END//
+END$$
 
 -- Trigger: Calcular IVA automáticamente al crear venta
 CREATE TRIGGER calcular_iva_venta
@@ -830,12 +854,12 @@ BEGIN
         SET NEW.iva = 0;
         SET NEW.total = NEW.subtotal - NEW.descuento;
     END IF;
-END//
+END$$
 
 DELIMITER ;
 
 -- ==========================================================
--- 9. VISTAS ACTUALIZADAS
+-- 10. VISTAS ÚTILES
 -- ==========================================================
 
 -- Vista productos completa con modalidades por variante
@@ -893,157 +917,45 @@ WHERE p.activo = TRUE
 AND vp.activo = TRUE 
 AND mp.activa = TRUE;
 
--- Vista detalle pedidos completa
-CREATE VIEW vista_detalle_pedidos_completa AS
+-- ✅ VISTA: Pedidos con información de numeración diaria
+CREATE VIEW vista_pedidos_con_numeracion AS
 SELECT 
-    dp.id_detalle,
-    dp.id_pedido,
-    dp.cantidad,
-    dp.precio_unitario,
-    dp.tipo_precio,
-    dp.subtotal,
-    dp.observaciones as detalle_observaciones,
-    dp.precio_autorizado_por,
-    dp.motivo_precio_personalizado,
-    
-    -- Información del pedido
+    p.id_pedido,
     p.numero_pedido,
-    p.estado as pedido_estado,
+    p.numero_diario,
+    LPAD(p.numero_diario, 3, '0') AS numero_cliente_formateado,
+    p.estado,
     p.tipo_documento,
-    
-    -- Información de la modalidad
-    mp.id_modalidad,
-    mp.nombre as modalidad_nombre,
-    mp.descripcion as modalidad_descripcion,
-    mp.cantidad_base,
-    mp.es_cantidad_variable,
-    mp.precio_costo,
-    mp.precio_neto,
-    mp.precio_neto_factura,
-    mp.precio_con_iva,
-    
-    -- Información de la variante
-    vp.id_variante_producto,
-    vp.sku,
-    vp.color,
-    vp.medida,
-    vp.material,
-    vp.descripcion as variante_descripcion,
-    
-    -- Información del producto
-    pr.id_producto,
-    pr.codigo as producto_codigo,
-    pr.nombre as producto_nombre,
-    pr.tipo as producto_tipo,
-    pr.descripcion as producto_descripcion,
-    pr.unidad_medida,
+    p.total,
+    p.fecha_creacion,
+    DATE(p.fecha_creacion) AS fecha_solo,
+    TIME(p.fecha_creacion) AS hora_solo,
+    DATEDIFF(CURDATE(), DATE(p.fecha_creacion)) AS dias_transcurridos,
     
     -- Información del vendedor
-    u.nombre_completo as vendedor_nombre,
+    u.usuario AS vendedor_usuario,
+    u.nombre_completo AS vendedor_nombre,
     
     -- Información del cliente (si existe)
-    c.nombre as cliente_nombre,
-    c.rut as cliente_rut,
+    c.nombre AS cliente_nombre,
+    c.rut AS cliente_rut,
     
-    -- Usuario que autorizó precio personalizado (si aplica)
-    ua.nombre_completo as precio_autorizado_por_nombre    
+    -- Estado con número
+    CASE p.estado
+        WHEN 'vale_pendiente' THEN CONCAT('📋 Vale #', LPAD(p.numero_diario, 3, '0'), ' - Esperando en caja')
+        WHEN 'procesando_caja' THEN CONCAT('⏳ Vale #', LPAD(p.numero_diario, 3, '0'), ' - Procesando pago')
+        WHEN 'completado' THEN CONCAT('✅ Vale #', LPAD(p.numero_diario, 3, '0'), ' - Completado')
+        WHEN 'cancelado' THEN CONCAT('❌ Vale #', LPAD(p.numero_diario, 3, '0'), ' - Cancelado')
+        ELSE p.estado
+    END AS estado_con_numero
     
-FROM detalle_pedidos dp
-JOIN pedidos p ON dp.id_pedido = p.id_pedido
-JOIN variantes_producto vp ON dp.id_variante_producto = vp.id_variante_producto
-JOIN productos pr ON vp.id_producto = pr.id_producto
-JOIN modalidades_producto mp ON dp.id_modalidad = mp.id_modalidad
+FROM pedidos p
 JOIN usuarios u ON p.id_vendedor = u.id_usuario
 LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
-LEFT JOIN usuarios ua ON dp.precio_autorizado_por = ua.id_usuario;
-
--- Vista clientes con datos pendientes
-CREATE VIEW vista_clientes_datos_pendientes AS
-SELECT 
-    c.id_cliente,
-    c.rut,
-    c.tipo_cliente,
-    c.nombre,
-    c.razon_social,
-    c.datos_completos,
-    COUNT(p.id_pedido) AS facturas_pendientes,
-    SUM(p.total) AS monto_pendiente,
-    MIN(p.fecha_creacion) AS primera_factura_pendiente
-FROM clientes c
-INNER JOIN pedidos p ON p.id_cliente = c.id_cliente
-WHERE p.estado = 'pagado_datos_pendientes'
-  AND p.tipo_documento = 'factura'
-  AND c.datos_completos = FALSE
-GROUP BY c.id_cliente
-ORDER BY primera_factura_pendiente ASC;
-
--- Vista stock por productos
-CREATE VIEW vista_stock_productos AS
-SELECT 
-    p.id_producto,
-    p.codigo,
-    p.nombre as producto_nombre,
-    p.tipo as producto_tipo,
-    vp.id_variante_producto,
-    vp.sku,
-    vp.color,
-    vp.medida,
-    vp.material,
-    b.id_bodega,
-    b.nombre as bodega_nombre,
-    spb.cantidad_disponible,
-    spb.cantidad_reservada,
-    spb.stock_minimo,
-    spb.stock_maximo,
-    spb.fecha_actualizacion,
-    
-    -- Descripción completa
-    CASE 
-        WHEN p.tipo IS NOT NULL THEN 
-            CONCAT(p.tipo, ' ', p.nombre, 
-                   CASE 
-                       WHEN vp.color IS NOT NULL THEN CONCAT(' - ', vp.color)
-                       WHEN vp.medida IS NOT NULL THEN CONCAT(' - Med. ', vp.medida)
-                       ELSE ''
-                   END)
-        ELSE 
-            CONCAT(p.nombre,
-                   CASE 
-                       WHEN vp.medida IS NOT NULL THEN CONCAT(' - Med. ', vp.medida)
-                       WHEN vp.color IS NOT NULL THEN CONCAT(' - ', vp.color)
-                       ELSE ''
-                   END)
-    END AS descripcion_completa
-    
-FROM productos p
-JOIN variantes_producto vp ON p.id_producto = vp.id_producto
-JOIN stock_por_bodega spb ON vp.id_variante_producto = spb.id_variante_producto
-JOIN bodegas b ON spb.id_bodega = b.id_bodega
-WHERE p.activo = TRUE AND vp.activo = TRUE AND b.activa = TRUE
-ORDER BY p.tipo, p.nombre, vp.color, vp.medida, b.nombre;
-
--- Vista productos organizados por tipo
-CREATE VIEW vista_productos_por_tipo AS
-SELECT 
-    c.nombre AS categoria,
-    COALESCE(p.tipo, 'SIN TIPO') AS tipo_producto,
-    p.nombre AS linea_marca,
-    COUNT(DISTINCT vp.id_variante_producto) AS total_variantes,
-    COUNT(DISTINCT mp.id_modalidad) AS total_modalidades,
-    COALESCE(SUM(spb.cantidad_disponible), 0) AS stock_total,
-    MIN(mp.precio_neto) AS precio_minimo,
-    MAX(mp.precio_neto) AS precio_maximo
-FROM categorias c
-JOIN productos p ON c.id_categoria = p.id_categoria
-JOIN variantes_producto vp ON p.id_producto = vp.id_producto
-JOIN modalidades_producto mp ON vp.id_variante_producto = mp.id_variante_producto
-LEFT JOIN stock_por_bodega spb ON vp.id_variante_producto = spb.id_variante_producto
-WHERE p.activo = TRUE AND vp.activo = TRUE AND mp.activa = TRUE
-GROUP BY c.nombre, p.tipo, p.nombre
-ORDER BY c.nombre, p.tipo, p.nombre;
+ORDER BY p.fecha_creacion DESC, p.numero_diario DESC;
 
 -- ==========================================================
--- 10. DATOS INICIALES
+-- 11. DATOS INICIALES
 -- ==========================================================
 
 -- Roles del sistema
@@ -1054,7 +966,12 @@ INSERT INTO roles (nombre, descripcion, permisos) VALUES
 
 -- Usuario administrador (password: admin123)
 INSERT INTO usuarios (usuario, password_hash, nombre_completo, email, id_rol) VALUES
-('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMye1jrwtMNOySDEb8K9yJ3TksE7nQP/nOa', 'Administrador del Sistema', 'admin@santitelas.cl', 1);
+-- admin / admin123
+('admin', 'admin123', 'Administrador del Sistema', 'admin@santitelas.cl', 1),
+-- cajero1 / cajero123  
+('cajero1', 'cajero123', 'María González', 'maria@santitelas.cl', 2),
+-- vendedor1 / vendedor123
+('vendedor1', 'vendedor123', 'Juan Pérez', 'juan@santitelas.cl', 3);
 
 -- Categorías de productos
 INSERT INTO categorias (nombre, descripcion) VALUES
@@ -1092,17 +1009,20 @@ INSERT INTO cajas (nombre, ubicacion, activa) VALUES
 ('Caja Secundaria', 'Mostrador Auxiliar', TRUE);
 
 -- ==========================================================
--- PRODUCTOS DE EJEMPLO CON NUEVA ESTRUCTURA
+-- 12. PRODUCTOS DE EJEMPLO
 -- ==========================================================
 
 -- PRODUCTOS BASE CON PLANTILLAS DE PRECIOS
 INSERT INTO productos (codigo, nombre, descripcion, id_categoria, tipo, unidad_medida, precio_costo_base, precio_neto_base, precio_neto_factura_base) VALUES
 -- TELAS (precios iguales para todas las variantes)
 ('LIN-GUCCI-001', 'GUCCI', 'Línea GUCCI de telas de lino premium', 1, 'LINO', 'metro', 2500, 3800, 3193),
-('LIN-VERSACE-001', 'VERSACE', 'Línea VERSACE de telas de lino', 1, 'LINO', 'metro', 2300, 3500, 2941),
-('FEL-PREMIUM-001', 'PREMIUM', 'Línea premium de felpa suave', 1, 'FELPA', 'metro', 1800, 2500, 2101),
+('LIN-VERSACE-001', 'GABANNA', 'Línea VERSACE de telas de lino', 1, 'LINO', 'metro', 2300, 3500, 2941),
+('FEL-PREMIUM-001', 'FELPA SANTI', 'Línea premium de felpa suave', 1, 'FELPA', 'metro', 1800, 2500, 2101),
 
--- OTROS PRODUCTOS ADICIONALES
+-- CORCHETES (cada medida tendrá precio diferente)
+('COR-MEDIDAS-001', 'Corchetes Varios', 'Corchetes metálicos de diferentes medidas', 4, 'CORCHETES', 'unidad', 100, 150, 126),
+
+-- OTROS PRODUCTOS
 ('ACC-BOT-001', 'Botones Clásicos', 'Botones básicos para confección', 2, NULL, 'unidad', 100, 150, 126),
 ('HIL-ALG-001', 'Hilo Algodón', 'Hilo de algodón para costura', 5, NULL, 'unidad', 300, 450, 378),
 ('PAT-MAD-001', 'Pata Madera', 'Patas de madera para muebles', 3, 'MADERA', 'unidad', 500, 800, 672);
@@ -1117,13 +1037,13 @@ INSERT INTO variantes_producto (id_producto, sku, color, medida, descripcion) VA
 (1, 'LIN-GUCCI-VER', 'Verde', NULL, 'Lino Gucci color Verde'),
 
 -- LINO VERSACE
-(2, 'LIN-VERSACE-BLA', 'Blanco', NULL, 'Lino Versace color Blanco'),
-(2, 'LIN-VERSACE-NEG', 'Negro', NULL, 'Lino Versace color Negro'),
-(2, 'LIN-VERSACE-DOR', 'Dorado', NULL, 'Lino Versace color Dorado'),
+(2, 'LIN-GABANNA-BLA', 'Blanco', NULL, 'Lino Versace color Blanco'),
+(2, 'LIN-GABANNA-NEG', 'Negro', NULL, 'Lino Versace color Negro'),
+(2, 'LIN-GABANNA-DOR', 'Dorado', NULL, 'Lino Versace color Dorado'),
 
 -- FELPA PREMIUM  
-(3, 'FEL-PREMIUM-GRI', 'Gris', NULL, 'Felpa premium color Gris'),
-(3, 'FEL-PREMIUM-AZU', 'Azul', NULL, 'Felpa premium color Azul'),
+(3, 'FEL-SANTI-GRI', 'Gris', NULL, 'Felpa premium color Gris'),
+(3, 'FEL-SANTI-AZU', 'Azul', NULL, 'Felpa premium color Azul'),
 
 -- CORCHETES - Cada medida tendrá precio diferente
 (4, 'COR-71', NULL, '71', 'Corchete medida 71'),
@@ -1144,19 +1064,24 @@ INSERT INTO variantes_producto (id_producto, sku, color, medida, descripcion) VA
 INSERT INTO clientes (rut, tipo_cliente, nombre, datos_completos) VALUES
 ('12345678-9', 'empresa', 'Cliente por completar datos', FALSE);
 
--- ==========================================================
--- FINALIZACIÓN Y VERIFICACIÓN
--- ==========================================================
+-- Stock inicial para algunas variantes
+INSERT INTO stock_por_bodega (id_variante_producto, id_bodega, cantidad_disponible) VALUES
+-- Stocks para LINO GUCCI en sala de ventas
+(1, 1, 150.0), -- Blanco
+(2, 1, 120.0), -- Negro  
+(3, 1, 80.0),  -- Azul
+(4, 1, 200.0), -- Rojo
+(5, 1, 90.0),  -- Verde
 
-SELECT 
-    'Base de datos SANTITELAS con modalidades por variante creada exitosamente' AS resultado,
-    CONCAT('Productos: ', (SELECT COUNT(*) FROM productos)) AS productos_creados,
-    CONCAT('Variantes: ', (SELECT COUNT(*) FROM variantes_producto)) AS variantes_creadas,
-    CONCAT('Modalidades: ', (SELECT COUNT(*) FROM modalidades_producto)) AS modalidades_creadas,
-    NOW() AS fecha_creacion;
+-- Stocks para corchetes
+(11, 1, 500), -- Corchete 71
+(12, 1, 300), -- Corchete 12
+(13, 1, 150), -- Corchete 1445
+(14, 1, 200), -- Corchete 1450
+(15, 1, 100); -- Corchete 8012
 
 -- ==========================================================
--- AJUSTES DE PRECIOS ESPECÍFICOS (después de la creación inicial)
+-- 13. AJUSTES FINALES DE PRECIOS
 -- ==========================================================
 
 -- Actualizar precios específicos para corchetes (diferentes por medida)
@@ -1189,56 +1114,28 @@ SET
     END
 WHERE vp.medida IN ('71', '12', '1445', '1450', '8012');
 
--- Crear oferta especial para GUCCI Rojo (ejemplo de precio personalizado)
-UPDATE modalidades_producto mp
-JOIN variantes_producto vp ON mp.id_variante_producto = vp.id_variante_producto
-SET 
-    mp.precio_neto = 3200,  -- Descuento de $600
-    mp.precio_neto_factura = 2689
-WHERE vp.color = 'Rojo' AND vp.sku = 'LIN-GUCCI-ROJ';
+-- ==========================================================
+-- 14. VERIFICACIÓN FINAL
+-- ==========================================================
 
--- Ajustar precios para modalidades EMBALAJE de corchetes (descuento por cantidad)
-UPDATE modalidades_producto mp
-JOIN variantes_producto vp ON mp.id_variante_producto = vp.id_variante_producto
-SET 
-    mp.precio_costo = CASE vp.medida
-        WHEN '71' THEN 75
-        WHEN '12' THEN 80
-        WHEN '1445' THEN 105
-        WHEN '1450' THEN 110
-        WHEN '8012' THEN 125
-        ELSE mp.precio_costo
-    END,
-    mp.precio_neto = CASE vp.medida
-        WHEN '71' THEN 140
-        WHEN '12' THEN 150
-        WHEN '1445' THEN 190
-        WHEN '1450' THEN 200
-        WHEN '8012' THEN 220
-        ELSE mp.precio_neto
-    END,
-    mp.precio_neto_factura = CASE vp.medida
-        WHEN '71' THEN 118
-        WHEN '12' THEN 126
-        WHEN '1445' THEN 160
-        WHEN '1450' THEN 168
-        WHEN '8012' THEN 185
-        ELSE mp.precio_neto_factura
-    END
-WHERE vp.medida IN ('71', '12', '1445', '1450', '8012') AND mp.nombre = 'EMBALAJE';
-
--- Ejemplo: Promoción especial para hilos negros
-UPDATE modalidades_producto mp
-JOIN variantes_producto vp ON mp.id_variante_producto = vp.id_variante_producto
-JOIN productos p ON vp.id_producto = p.id_producto
-SET 
-    mp.precio_neto = 380,  -- Descuento de $70
-    mp.precio_neto_factura = 319
-WHERE vp.color = 'Negro' AND p.codigo = 'HIL-ALG-001';
-
--- Verificar estructura de precios
 SELECT 
-    '=== VERIFICACIÓN DE PRECIOS POR VARIANTE ===' AS titulo;
+    '🎉 BASE DE DATOS SANTITELAS CREADA EXITOSAMENTE' AS resultado,
+    CONCAT('✅ Productos: ', (SELECT COUNT(*) FROM productos)) AS productos_creados,
+    CONCAT('✅ Variantes: ', (SELECT COUNT(*) FROM variantes_producto)) AS variantes_creadas,
+    CONCAT('✅ Modalidades: ', (SELECT COUNT(*) FROM modalidades_producto)) AS modalidades_creadas,
+    CONCAT('✅ Stocks: ', (SELECT COUNT(*) FROM stock_por_bodega)) AS registros_stock,
+    NOW() AS fecha_creacion;
+
+-- ✅ PROBAR LAS FUNCIONES DE NUMERACIÓN
+SELECT 
+    '🔢 PROBANDO FUNCIONES DE NUMERACIÓN DIARIA' AS titulo,
+    obtener_proximo_numero_diario() AS proximo_numero_diario,
+    generar_numero_pedido_simple() AS numero_completo_generado,
+    generar_numero_venta() AS numero_venta_generado;
+
+-- ✅ MOSTRAR ESTRUCTURA DE PRECIOS
+SELECT 
+    '📊 ESTRUCTURA DE PRECIOS POR VARIANTE' AS titulo;
 
 SELECT 
     p.nombre AS PRODUCTO,
@@ -1247,9 +1144,22 @@ SELECT
     vp.medida,
     mp.nombre AS MODALIDAD,
     mp.precio_neto AS PRECIO_NETO,
-    mp.precio_neto_factura AS PRECIO_FACTURA
+    mp.precio_neto_factura AS PRECIO_FACTURA,
+    mp.precio_con_iva AS PRECIO_CON_IVA
 FROM productos p
 JOIN variantes_producto vp ON p.id_producto = vp.id_producto
 JOIN modalidades_producto mp ON vp.id_variante_producto = mp.id_variante_producto
 WHERE p.activo = TRUE AND vp.activo = TRUE AND mp.activa = TRUE
-ORDER BY p.nombre, vp.color, vp.medida, mp.nombre;
+ORDER BY p.nombre, vp.color, vp.medida, mp.nombre
+LIMIT 10;
+
+-- ✅ MOSTRAR RESUMEN DE NUMERACIÓN
+SELECT 
+    '📋 RESUMEN PARA NUMERACIÓN DIARIA' AS titulo;
+
+SELECT 
+    DATE(NOW()) AS fecha_hoy,
+    'No hay pedidos aún' AS estado_actual,
+    'VP' AS prefijo_vales,
+    'VT' AS prefijo_ventas,
+    'Los números diarios se reinician cada día' AS nota;
