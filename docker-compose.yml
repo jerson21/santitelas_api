@@ -75,7 +75,7 @@ services:
       FRONTEND_URL: http://localhost:3000,http://localhost:3001
 
       # Seeder
-      SEED_DATABASE: false
+      SEED_DATABASE: true
 
     ports:
       - "5000:5000"
