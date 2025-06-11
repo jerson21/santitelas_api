@@ -1,4 +1,4 @@
-// src/utils/seeder.ts - VERSIÓN COMPLETA CON USUARIOS, CONFIGURACIÓN BÁSICA Y DATOS DEL SQL
+// src/utils/seeder.ts - VERSIÓN COMPLETA CON DATOS BÁSICOS
 
 import {
   Rol,
@@ -17,94 +17,331 @@ import {
 
 export async function seedDatabase() {
   try {
-    console.log('🌱 Iniciando siembra de datos...');
+    console.log('🌱 Iniciando seeder...');
+    console.log('');
 
-    await createRoles();
+    // CREAR DATOS BÁSICOS PRIMERO
+    await createBasicData();
+
+    // Crear usuarios después de los roles
     await createUsers();
-    await createCategories();
-    await createDocumentTypes();
-    await createWarehouses();
-    await createPaymentMethods();
-    await createCashRegisters();
 
-    // Ahora agregamos los datos adicionales que estaban en tu script SQL:
-
-    await createProducts();
-    await createVariants();
-    await createClients();
-    await createInitialStock();
-    await createModalitiesForExistingVariants();
-    await adjustModalitiesPrices();
+    // Datos de ejemplo solo en desarrollo
+    if (process.env.NODE_ENV === 'development') {
+      console.log('');
+      console.log('🏪 Creando datos de ejemplo para desarrollo...');
+      await createProducts();
+      await createVariants();
+      await createClients();
+      await createInitialStock();
+      await createModalitiesForExistingVariants();
+      await adjustModalitiesPrices();
+    }
 
     console.log('');
-    console.log('🌱 ¡Siembra de datos completada!');
+    console.log('🌱 ¡Seeder completado!');
     console.log('');
     console.log('📝 Resumen:');
-    console.log('   👤 Roles, usuarios y configuración básica creados');
-    console.log('   📦 Productos, variantes, clientes y stock inicial creados/actualizados');
+    console.log('   ✅ Datos básicos creados');
+    console.log('   👤 Usuarios creados con contraseñas hasheadas');
+    if (process.env.NODE_ENV === 'development') {
+      console.log('   📦 Productos de ejemplo creados');
+    }
     console.log('');
   } catch (error) {
-    console.error('❌ Error en la siembra de datos:', error);
+    console.error('❌ Error en seeder:', error);
     throw error;
   }
 }
 
-// ===== FUNCIONES AUXILIARES =====
+// CREAR TODOS LOS DATOS BÁSICOS
+async function createBasicData() {
+  console.log('📋 Creando datos básicos...');
+  
+  // 1. ROLES
+  await createRoles();
+  
+  // 2. CATEGORÍAS
+  await createCategories();
+  
+  // 3. TIPOS DE DOCUMENTO
+  await createDocumentTypes();
+  
+  // 4. BODEGAS
+  await createWarehouses();
+  
+  // 5. MÉTODOS DE PAGO
+  await createPaymentMethods();
+  
+  // 6. CAJAS
+  await createCashes();
+  
+  console.log('✅ Datos básicos creados');
+  console.log('');
+}
 
 async function createRoles() {
-  const rolesData = [
+  console.log('   👥 Creando roles...');
+  
+  const roles = [
     {
-      nombre: 'ADMINISTRADOR',
-      descripcion: 'Acceso total al sistema',
-      permisos: ['admin', 'ventas', 'productos', 'usuarios'],
+      id_rol: 1,
+      nombre: 'Administrador',  // Cambiado de nombre_rol a nombre
+      descripcion: 'Acceso total al sistema'
+    },
+    {
+      id_rol: 2,
+      nombre: 'Cajero',  // Cambiado de nombre_rol a nombre
+      descripcion: 'Gestión de caja y ventas'
+    },
+     {
+      id_rol: 3,
+      nombre: 'Bodeguero',  // Cambiado de nombre_rol a nombre
+      descripcion: 'Gestión de inventario'
+    },
+    {
+      id_rol: 4,
+      nombre: 'Vendedor',  // Cambiado de nombre_rol a nombre
+      descripcion: 'Gestión de ventas'
+    }
+  ];
+
+  for (const rol of roles) {
+    await Rol.findOrCreate({
+      where: { id_rol: rol.id_rol },
+      defaults: rol
+    });
+  }
+  
+  console.log('      ✓ Roles creados');
+}
+
+async function createCategories() {
+  console.log('   📁 Creando categorías...');
+  
+  const categorias = [
+    {
+      nombre: 'TELAS',
+      descripcion: 'Telas de diferentes tipos y materiales',
+      activa: true  // Cambiado de activo a activa
+    },
+    {
+      nombre: 'CORCHETES',
+      descripcion: 'Corchete tapiceria',
+      activa: true  // Cambiado de activo a activa
+    },
+    {
+      nombre: 'ACCESORIOS',
+      descripcion: 'Accesorios varios para costura',
+      activa: true  // Cambiado de activo a activa
+    },
+    {
+      nombre: 'HILOS',
+      descripcion: 'Hilos de diferentes tipos',
+      activa: true  // Cambiado de activo a activa
+    }
+  ];
+
+  for (const categoria of categorias) {
+    await Categoria.findOrCreate({
+      where: { nombre: categoria.nombre },
+      defaults: categoria
+    });
+  }
+  
+  console.log('      ✓ Categorías creadas');
+}
+
+async function createDocumentTypes() {
+  console.log('   📄 Creando tipos de documento...');
+  
+  const tiposDocumento = [
+     {
+      codigo: 'TICK',
+      nombre: 'Ticket',
+      requiere_rut_cliente: false,  // Cambiado de requiere_datos_cliente
       activo: true
     },
     {
-      nombre: 'CAJERO',
-      descripcion: 'Acceso a ventas y pagos',
-      permisos: ['ventas', 'pagos'],
+      codigo: 'BOL',
+      nombre: 'Boleta',
+      requiere_rut_cliente: false,  // Cambiado de requiere_datos_cliente
       activo: true
     },
     {
-      nombre: 'VENDEDOR',
-      descripcion: 'Acceso a pedidos y productos',
-      permisos: ['pedidos', 'productos.ver'],
+      codigo: 'FAC',
+      nombre: 'Factura',
+      requiere_rut_cliente: true,  // Cambiado de requiere_datos_cliente
+      activo: true
+    },
+    {
+      codigo: 'GDE',
+      nombre: 'Guía de Despacho',
+      requiere_rut_cliente: true,  // Cambiado de requiere_datos_cliente
+      activo: true
+    },
+    {
+      codigo: 'COT',
+      nombre: 'Cotización',
+      requiere_rut_cliente: false,  // Cambiado de requiere_datos_cliente
       activo: true
     }
   ];
 
-  for (const rolData of rolesData) {
-    await Rol.findOrCreate({
-      where: { nombre: rolData.nombre },
-      defaults: rolData
+  for (const tipo of tiposDocumento) {
+    await TipoDocumento.findOrCreate({
+      where: { codigo: tipo.codigo },
+      defaults: tipo
     });
   }
-
-  console.log('✅ Roles creados');
+  
+  console.log('      ✓ Tipos de documento creados');
 }
 
+async function createWarehouses() {
+  console.log('   🏭 Creando bodegas...');
+  
+  const bodegas = [
+    {
+      codigo: 'SALA',
+      nombre: 'Sala de Ventas',
+      direccion: 'Local principal',
+      es_punto_venta: true,  // Cambiado de es_principal
+      activa: true  // Cambiado de activo a activa
+    },
+    {
+      codigo: 'BOD01',
+      nombre: 'Bodega Principal',
+      direccion: 'Bodega central',
+      es_punto_venta: false,  // Cambiado de es_principal
+      activa: true  // Cambiado de activo a activa
+    },
+    {
+      codigo: 'BOD02',
+      nombre: 'Bodega Secundaria',
+      direccion: 'Bodega auxiliar',
+      es_punto_venta: false,  // Cambiado de es_principal
+      activa: true  // Cambiado de activo a activa
+    }
+  ];
+
+  for (const bodega of bodegas) {
+    await Bodega.findOrCreate({
+      where: { codigo: bodega.codigo },
+      defaults: bodega
+    });
+  }
+  
+  console.log('      ✓ Bodegas creadas');
+}
+
+async function createPaymentMethods() {
+  console.log('   💳 Creando métodos de pago...');
+  
+  const metodosPago = [
+    {
+      codigo: 'EFE',
+      nombre: 'Efectivo',
+      tipo: 'EFECTIVO',
+      requiere_referencia: false,
+      activo: true
+    },
+    {
+      codigo: 'DEB',
+      nombre: 'Tarjeta de Débito',
+      tipo: 'TARJETA',
+      requiere_referencia: true,
+      activo: true
+    },
+    {
+      codigo: 'CRE',
+      nombre: 'Tarjeta de Crédito',
+      tipo: 'TARJETA',
+      requiere_referencia: true,
+      activo: true
+    },
+    {
+      codigo: 'TRA',
+      nombre: 'Transferencia',
+      tipo: 'TRANSFERENCIA',
+      requiere_referencia: true,
+      activo: true
+    }
+    // Removido el método Cheque ya que no es un tipo válido
+  ];
+
+  for (const metodo of metodosPago) {
+    await MetodoPago.findOrCreate({
+      where: { codigo: metodo.codigo },
+      defaults: metodo
+    });
+  }
+  
+  console.log('      ✓ Métodos de pago creados');
+}
+
+async function createCashes() {
+  console.log('   💰 Creando cajas...');
+  
+  const cajas = [
+    {
+      nombre: 'Caja Principal',
+      ubicacion: 'Área de ventas principal',
+      activa: true  // Cambiado de activo a activa
+    },
+    {
+      nombre: 'Caja Secundaria',
+      ubicacion: 'Área de ventas secundaria',
+      activa: true  // Cambiado de activo a activa
+    }
+  ];
+
+  for (const caja of cajas) {
+    await Caja.findOrCreate({
+      where: { nombre: caja.nombre },  // Buscar por nombre, no por código
+      defaults: caja
+    });
+  }
+  
+  console.log('      ✓ Cajas creadas');
+}
+
+// CREAR USUARIOS
 async function createUsers() {
+  console.log('👤 Creando usuarios con contraseñas hasheadas...');
+  
   const usersData = [
     {
       usuario: 'admin',
       password: 'admin123',
       nombre_completo: 'Administrador del Sistema',
       email: 'admin@santitelas.cl',
-      id_rol: 1
+      id_rol: 1,
+      activo: true
     },
     {
       usuario: 'cajero1',
       password: 'cajero123',
-      nombre_completo: 'María González',
+      nombre_completo: 'Cajero',
       email: 'maria@santitelas.cl',
-      id_rol: 2
+      id_rol: 2,
+      activo: true
     },
     {
       usuario: 'vendedor1',
       password: 'vendedor123',
-      nombre_completo: 'Juan Pérez',
+      nombre_completo: 'Vendedor',
       email: 'juan@santitelas.cl',
-      id_rol: 3
+      id_rol: 3,
+      activo: true
+    },
+    {
+      usuario: 'bodeguero1',
+      password: 'bodega123',
+      nombre_completo: 'Bodega',
+      email: 'carlos@santitelas.cl',
+      id_rol: 4,
+      activo: true
     }
   ];
 
@@ -112,458 +349,332 @@ async function createUsers() {
     await createUserSafely(userData);
   }
 
-  console.log('✅ Usuarios creados con hashes correctos');
+  console.log('');
+  console.log('✅ Usuarios creados exitosamente');
+  console.log('');
+  console.log('🔐 CREDENCIALES DE ACCESO:');
+  console.log('   ┌─────────────┬──────────────┐');
+  console.log('   │ Usuario     │ Contraseña   │');
+  console.log('   ├─────────────┼──────────────┤');
+  console.log('   │ admin       │ admin123     │');
+  console.log('   │ cajero1     │ cajero123    │');
+  console.log('   │ vendedor1   │ vendedor123  │');
+  console.log('   │ bodeguero1  │ bodega123    │');
+  console.log('   └─────────────┴──────────────┘');
 }
 
 async function createUserSafely(userData: any) {
-  let user = await Usuario.findOne({ where: { usuario: userData.usuario } });
+  try {
+    const existingUser = await Usuario.findOne({ 
+      where: { usuario: userData.usuario } 
+    });
 
-  if (user) {
-    // Si el usuario existe, verificar si la contraseña funciona
-    const passwordWorks = await user.verificarPassword(userData.password);
-    if (!passwordWorks) {
-      // Si no funciona, actualizar el hash
-      await user.update({ password_hash: userData.password, activo: true });
-      console.log(`🔄 Actualizado hash de contraseña para ${userData.usuario}`);
+    if (existingUser) {
+      console.log(`   ℹ️  Usuario ${userData.usuario} ya existe, verificando...`);
+      
+      const passwordValid = await existingUser.verificarPassword(userData.password);
+      
+      if (!passwordValid) {
+        console.log(`   🔄 Actualizando contraseña para ${userData.usuario}...`);
+        existingUser.password_hash = userData.password;
+        await existingUser.save();
+        console.log(`   ✅ Contraseña actualizada para ${userData.usuario}`);
+      } else {
+        console.log(`   ✅ ${userData.usuario} - contraseña correcta`);
+      }
+      
+      if (!existingUser.activo) {
+        existingUser.activo = true;
+        await existingUser.save();
+      }
     } else {
-      console.log(`✅ Usuario ${userData.usuario} ya existe con contraseña correcta`);
+      console.log(`   🆕 Creando usuario ${userData.usuario}...`);
+      
+      await Usuario.create({
+        usuario: userData.usuario,
+        password_hash: userData.password, // El hook lo hasheará
+        nombre_completo: userData.nombre_completo,
+        email: userData.email,
+        id_rol: userData.id_rol,
+        activo: true
+      });
+      
+      console.log(`   ✅ Usuario ${userData.usuario} creado`);
     }
-  } else {
-    // Si no existe, crearlo (asumimos que createWithPassword genera el hash interno)
-    await Usuario.createWithPassword(userData);
-    console.log(`🆕 Usuario ${userData.usuario} creado`);
+  } catch (error) {
+    console.error(`   ❌ Error con usuario ${userData.usuario}:`, error);
+    throw error;
   }
 }
 
-async function createCategories() {
-  await Categoria.bulkCreate(
-    [
-      { nombre: 'TELAS', descripcion: 'Telas de diferentes tipos y materiales', activa: true },
-      { nombre: 'ACCESORIOS', descripcion: 'Accesorios de costura y mercería', activa: true },
-      { nombre: 'HILOS', descripcion: 'Hilos para costura y bordado', activa: true },
-      { nombre: 'BOTONES', descripcion: 'Botones de diferentes tipos y tamaños', activa: true },
-      { nombre: 'PATAS', descripcion: 'Patas y accesorios de costura', activa: true },
-      { nombre: 'CORCHETES', descripcion: 'Corchetes metálicos de diferentes medidas', activa: true }
-    ],
-    {
-      ignoreDuplicates: true,
-      updateOnDuplicate: ['descripcion', 'activa']
-    }
-  );
-
-  console.log('✅ Categorías básicas creadas/actualizadas');
-}
-
-async function createDocumentTypes() {
-  await TipoDocumento.bulkCreate(
-    [
-      {
-        nombre: 'Ticket',
-        codigo: 'TIC',
-        requiere_rut_cliente: false,
-        es_fiscal: false,
-        aplica_iva: false,
-        activo: true
-      },
-      {
-        nombre: 'Boleta',
-        codigo: 'BOL',
-        requiere_rut_cliente: false,
-        es_fiscal: true,
-        aplica_iva: false,
-        activo: true
-      },
-      {
-        nombre: 'Factura',
-        codigo: 'FAC',
-        requiere_rut_cliente: true,
-        es_fiscal: true,
-        aplica_iva: true,
-        activo: true
-      }
-    ],
-    { ignoreDuplicates: true }
-  );
-
-  console.log('✅ Tipos de documento creados');
-}
-
-async function createWarehouses() {
-  await Bodega.bulkCreate(
-    [
-      {
-        codigo: 'SALA',
-        nombre: 'Sala de Ventas',
-        descripcion: 'Punto de venta principal',
-        es_punto_venta: true,
-        activa: true
-      },
-      {
-        codigo: 'BOD1',
-        nombre: 'Bodega Principal',
-        descripcion: 'Almacén principal',
-        es_punto_venta: false,
-        activa: true
-      },
-      {
-        codigo: 'BOD2',
-        nombre: 'Bodega Secundaria',
-        descripcion: 'Almacén de respaldo',
-        es_punto_venta: false,
-        activa: true
-      }
-    ],
-    { ignoreDuplicates: true }
-  );
-
-  console.log('✅ Bodegas creadas');
-}
-
-async function createPaymentMethods() {
-  await MetodoPago.bulkCreate(
-    [
-      { nombre: 'Efectivo', codigo: 'EFE', tipo: 'efectivo', requiere_referencia: false, activo: true },
-      { nombre: 'Tarjeta Débito', codigo: 'DEB', tipo: 'tarjeta', requiere_referencia: true, activo: true },
-      { nombre: 'Tarjeta Crédito', codigo: 'CRE', tipo: 'tarjeta', requiere_referencia: true, activo: true },
-      { nombre: 'Transferencia', codigo: 'TRA', tipo: 'transferencia', requiere_referencia: true, activo: true }
-    ],
-    { ignoreDuplicates: true }
-  );
-
-  console.log('✅ Métodos de pago creados');
-}
-
-async function createCashRegisters() {
-  await Caja.bulkCreate(
-    [
-      { nombre: 'Caja Principal', ubicacion: 'Mostrador 1', activa: true },
-      { nombre: 'Caja Secundaria', ubicacion: 'Mostrador 2', activa: true }
-    ],
-    { ignoreDuplicates: true }
-  );
-
-  console.log('✅ Cajas creadas');
-}
-
-// ===== DATOS ADICIONALES DEL SCRIPT SQL =====
+// ===== DATOS DE EJEMPLO PARA DESARROLLO =====
 
 async function createProducts() {
-  // Bulk create de productos base según tu SQL
-  await Producto.bulkCreate(
-    [
-      {
-        codigo: 'LIN-GUCCI-001',
-        nombre: 'GUCCI',
-        descripcion: 'Línea GUCCI de telas de lino premium',
-        id_categoria: 1, // TELAS
-        tipo: 'LINO',
-        unidad_medida: 'metro',
-        precio_costo_base: 2500,
-        precio_neto_base: 3800,
-        precio_neto_factura_base: 3193,
-        activo: true
-      },
-      {
-        codigo: 'LIN-VERSACE-001',
-        nombre: 'VERSACE',
-        descripcion: 'Línea VERSACE de telas de lino',
-        id_categoria: 1,
-        tipo: 'LINO',
-        unidad_medida: 'metro',
-        precio_costo_base: 2300,
-        precio_neto_base: 3500,
-        precio_neto_factura_base: 2941,
-        activo: true
-      },
-      {
-        codigo: 'FEL-PREMIUM-001',
-        nombre: 'PREMIUM',
-        descripcion: 'Línea premium de felpa suave',
-        id_categoria: 1,
-        tipo: 'FELPA',
-        unidad_medida: 'metro',
-        precio_costo_base: 1800,
-        precio_neto_base: 2500,
-        precio_neto_factura_base: 2101,
-        activo: true
-      },
-      {
-        codigo: 'COR-MEDIDAS-001',
-        nombre: 'Corchetes Varios',
-        descripcion: 'Corchetes metálicos de diferentes medidas',
-        id_categoria: 4, // CORCHETES
-        tipo: 'CORCHETES',
-        unidad_medida: 'unidad',
-        precio_costo_base: 100,
-        precio_neto_base: 150,
-        precio_neto_factura_base: 126,
-        activo: true
-      },
-      {
-        codigo: 'ACC-BOT-001',
-        nombre: 'Botones Clásicos',
-        descripcion: 'Botones básicos para confección',
-        id_categoria: 2, // ACCESORIOS
-        tipo: null,
-        unidad_medida: 'unidad',
-        precio_costo_base: 100,
-        precio_neto_base: 150,
-        precio_neto_factura_base: 126,
-        activo: true
-      },
-      {
-        codigo: 'HIL-ALG-001',
-        nombre: 'Hilo Algodón',
-        descripcion: 'Hilo de algodón para costura',
-        id_categoria: 5, // HILOS
-        tipo: null,
-        unidad_medida: 'unidad',
-        precio_costo_base: 300,
-        precio_neto_base: 450,
-        precio_neto_factura_base: 378,
-        activo: true
-      },
-      {
-        codigo: 'PAT-MAD-001',
-        nombre: 'Pata Madera',
-        descripcion: 'Patas de madera para muebles',
-        id_categoria: 3, // PATAS
-        tipo: 'MADERA',
-        unidad_medida: 'unidad',
-        precio_costo_base: 500,
-        precio_neto_base: 800,
-        precio_neto_factura_base: 672,
-        activo: true
-      }
-    ],
+  // Verificar si ya existen categorías
+  const telasCategory = await Categoria.findOne({ where: { nombre: 'TELAS' } });
+  const corchetesCategory = await Categoria.findOne({ where: { nombre: 'CORCHETES' } });
+  
+  if (!telasCategory || !corchetesCategory) {
+    console.log('⚠️  Categorías no encontradas, omitiendo productos');
+    return;
+  }
+
+  const productos = [
     {
-      ignoreDuplicates: true
+      codigo: 'LIN-GUCCI-001',
+      nombre: 'GUCCI',
+      descripcion: 'Línea GUCCI de telas de lino premium',
+      id_categoria: telasCategory.id_categoria,
+      tipo: 'LINO',
+      unidad_medida: 'metro',
+      precio_costo_base: 2500,
+      precio_neto_base: 3800,
+      precio_neto_factura_base: 3193,
+      activo: true
+    },
+    {
+      codigo: 'LIN-GABANNA-001',
+      nombre: 'Gabanna',
+      descripcion: 'Línea Gabanna de telas de lino',
+      id_categoria: telasCategory.id_categoria,
+      tipo: 'LINO',
+      unidad_medida: 'metro',
+      precio_costo_base: 2300,
+      precio_neto_base: 3500,
+      precio_neto_factura_base: 2941,
+      activo: true
+    },
+    {
+      codigo: 'FEL-SANTI-001',
+      nombre: 'SANTI PREMIUM',
+      descripcion: 'Línea premium de felpa suave',
+      id_categoria: telasCategory.id_categoria,
+      tipo: 'FELPA',
+      unidad_medida: 'metro',
+      precio_costo_base: 1800,
+      precio_neto_base: 2500,
+      precio_neto_factura_base: 2101,
+      activo: true
+    },
+    {
+      codigo: 'COR-MEDIDAS-001',
+      nombre: 'Corchetes',
+      descripcion: 'Corchetes metálicos de diferentes medidas',
+      id_categoria: corchetesCategory.id_categoria,
+      tipo: 'CORCHETES',
+      unidad_medida: 'unidad',
+      precio_costo_base: 0,
+      precio_neto_base: 0,
+      precio_neto_factura_base: 0,
+      activo: true
     }
-  );
+  ];
+
+  for (const prod of productos) {
+    await Producto.findOrCreate({
+      where: { codigo: prod.codigo },
+      defaults: prod
+    });
+  }
 
   console.log('✅ Productos de ejemplo creados');
 }
 
 async function createVariants() {
-  // Bulk create de variantes según tu SQL (asumiendo correspondencia de id_producto a lo insertado arriba)
-  await VarianteProducto.bulkCreate(
-    [
-      // GUCCI
-      { id_producto: 1, sku: 'LIN-GUCCI-BLA', color: 'Blanco', medida: null, descripcion: 'Lino Gucci color Blanco', activo: true },
-      { id_producto: 1, sku: 'LIN-GUCCI-NEG', color: 'Negro', medida: null, descripcion: 'Lino Gucci color Negro', activo: true },
-      { id_producto: 1, sku: 'LIN-GUCCI-AZU', color: 'Azul', medida: null, descripcion: 'Lino Gucci color Azul', activo: true },
-      { id_producto: 1, sku: 'LIN-GUCCI-ROJ', color: 'Rojo', medida: null, descripcion: 'Lino Gucci color Rojo', activo: true },
-      { id_producto: 1, sku: 'LIN-GUCCI-VER', color: 'Verde', medida: null, descripcion: 'Lino Gucci color Verde', activo: true },
+  // Obtener productos creados
+  const gucci = await Producto.findOne({ where: { codigo: 'LIN-GUCCI-001' } });
+  const gabanna = await Producto.findOne({ where: { codigo: 'LIN-GABANNA-001' } });
+  const felpa = await Producto.findOne({ where: { codigo: 'FEL-SANTI-001' } });
+  const corchetes = await Producto.findOne({ where: { codigo: 'COR-MEDIDAS-001' } });
 
-      // VERSACE
-      { id_producto: 2, sku: 'LIN-VERSACE-BLA', color: 'Blanco', medida: null, descripcion: 'Lino Versace color Blanco', activo: true },
-      { id_producto: 2, sku: 'LIN-VERSACE-NEG', color: 'Negro', medida: null, descripcion: 'Lino Versace color Negro', activo: true },
-      { id_producto: 2, sku: 'LIN-VERSACE-DOR', color: 'Dorado', medida: null, descripcion: 'Lino Versace color Dorado', activo: true },
+  if (!gucci || !gabanna || !felpa || !corchetes) {
+    console.log('⚠️  Productos no encontrados, omitiendo variantes');
+    return;
+  }
 
-      // FELPA PREMIUM  
-      { id_producto: 3, sku: 'FEL-PREMIUM-GRI', color: 'Gris', medida: null, descripcion: 'Felpa premium color Gris', activo: true },
-      { id_producto: 3, sku: 'FEL-PREMIUM-AZU', color: 'Azul', medida: null, descripcion: 'Felpa premium color Azul', activo: true },
+  const variantes = [
+    // GUCCI
+    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-CRU', color: 'Crudo', descripcion: 'Lino Gucci color Blanco' },
+    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-NEG', color: 'Negro', descripcion: 'Lino Gucci color Negro' },
+    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-AZU', color: 'Azul', descripcion: 'Lino Gucci color Azul' },
+    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-ROJ', color: 'Rojo', descripcion: 'Lino Gucci color Rojo' },
+    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-VER', color: 'Verde', descripcion: 'Lino Gucci color Verde' },
 
-      // CORCHETES - Cada medida
-      { id_producto: 4, sku: 'COR-71', color: null, medida: '71', descripcion: 'Corchete medida 71', activo: true },
-      { id_producto: 4, sku: 'COR-12', color: null, medida: '12', descripcion: 'Corchete medida 12', activo: true },
-      { id_producto: 4, sku: 'COR-1445', color: null, medida: '1445', descripcion: 'Corchete medida 1445', activo: true },
-      { id_producto: 4, sku: 'COR-1450', color: null, medida: '1450', descripcion: 'Corchete medida 1450', activo: true },
-      { id_producto: 4, sku: 'COR-8012', color: null, medida: '8012', descripcion: 'Corchete medida 8012', activo: true },
+    // GABANNA
+    { id_producto: gabanna.id_producto, sku: 'LIN-GABANNA-CRU', color: 'Crudo', descripcion: 'Lino gabanna color Blanco' },
+    { id_producto: gabanna.id_producto, sku: 'LIN-GABANNA-NEG', color: 'Negro', descripcion: 'Lino gabanna color Negro' },
+    { id_producto: gabanna.id_producto, sku: 'LIN-GABANNA-GM', color: 'Gris medio', descripcion: 'Lino gabanna color Dorado' },
+    { id_producto: gabanna.id_producto, sku: 'LIN-GABANNA-BEIG', color: 'Beige', descripcion: 'Lino gabanna color Beige' },
 
-      // OTROS PRODUCTOS
-      { id_producto: 5, sku: 'ACC-BOT-NE', color: 'Negro', medida: null, descripcion: 'Botones negros clásicos', activo: true },
-      { id_producto: 5, sku: 'ACC-BOT-BL', color: 'Blanco', medida: null, descripcion: 'Botones blancos clásicos', activo: true },
-      { id_producto: 6, sku: 'HIL-ALG-BL', color: 'Blanco', medida: null, descripcion: 'Hilo algodón blanco', activo: true },
-      { id_producto: 6, sku: 'HIL-ALG-NE', color: 'Negro', medida: null, descripcion: 'Hilo algodón negro', activo: true },
-      { id_producto: 7, sku: 'PAT-MAD-NAT', color: 'Natural', medida: null, descripcion: 'Pata madera natural', activo: true },
-      { id_producto: 7, sku: 'PAT-MAD-TEÑ', color: 'Teñida', medida: null, descripcion: 'Pata madera teñida', activo: true }
-    ],
-    { ignoreDuplicates: true }
-  );
+    // FELPA
+    { id_producto: felpa.id_producto, sku: 'FEL-SANTI-GRI', color: 'Gris', descripcion: 'Felpa santi color Gris' },
+    { id_producto: felpa.id_producto, sku: 'FEL-SANTI-AZU', color: 'Azul', descripcion: 'Felpa santi color Azul' },
+
+    // CORCHETES
+    { id_producto: corchetes.id_producto, sku: 'COR-7112', medida: '7112', descripcion: 'Corchete medida 71' },
+        { id_producto: corchetes.id_producto, sku: 'COR-8012', medida: '8012', descripcion: 'Corchete medida 8012' },
+    { id_producto: corchetes.id_producto, sku: 'COR-1445', medida: '1445', descripcion: 'Corchete medida 1445' },
+    { id_producto: corchetes.id_producto, sku: 'COR-1450', medida: '1450', descripcion: 'Corchete medida 1450' }
+  ];
+
+  for (const variante of variantes) {
+    await VarianteProducto.findOrCreate({
+      where: { sku: variante.sku },
+      defaults: { ...variante, activo: true }
+    });
+  }
 
   console.log('✅ Variantes de productos creadas');
 }
 
 async function createClients() {
-  // Cliente ejemplo
-  await Cliente.findOrCreate({
-    where: { rut: '12345678-9' },
-    defaults: {
+  // Crear algunos clientes de ejemplo
+  const clientes = [
+    {
+      rut: '12345678-9',
       tipo_cliente: 'empresa',
-      nombre: 'Cliente por completar datos',
+      nombre: 'Textiles del Sur Ltda.',
+      razon_social: 'Textiles del Sur Limitada',
+      giro: 'Venta de textiles',
+      direccion: 'Av. Principal 123',
+      comuna: 'Santiago',
+      ciudad: 'Santiago',
+      telefono: '+56912345678',
+      email: 'contacto@textilesdelsur.cl',
+      activo: true,
+      datos_completos: true
+    },
+    {
+      rut: '98765432-1',
+      tipo_cliente: 'persona',
+      nombre: 'María Rodríguez',
+      telefono: '+56987654321',
+      email: 'maria.rodriguez@email.cl',
       activo: true,
       datos_completos: false
+    },
+    {
+      rut: '11222333-4',
+      tipo_cliente: 'empresa',
+      nombre: 'Confecciones ABC',
+      razon_social: 'Confecciones ABC SpA',
+      giro: 'Confección de prendas',
+      direccion: 'Calle Los Aromos 456',
+      comuna: 'Providencia',
+      ciudad: 'Santiago',
+      activo: true,
+      datos_completos: true
     }
-  });
+  ];
 
-  console.log('✅ Cliente de ejemplo creado');
+  for (const cliente of clientes) {
+    await Cliente.findOrCreate({
+      where: { rut: cliente.rut },
+      defaults: cliente
+    });
+  }
+
+  console.log('✅ Clientes de ejemplo creados');
 }
 
 async function createInitialStock() {
-  // Insertar stock inicial para algunas variantes
-  const stockData = [
-    // Stocks para LINO GUCCI en sala de ventas (id_bodega = 1)
-    { id_variante_producto: 1, id_bodega: 1, cantidad_disponible: 150.0, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 },
-    { id_variante_producto: 2, id_bodega: 1, cantidad_disponible: 120.0, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 },
-    { id_variante_producto: 3, id_bodega: 1, cantidad_disponible: 80.0, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 },
-    { id_variante_producto: 4, id_bodega: 1, cantidad_disponible: 200.0, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 },
-    { id_variante_producto: 5, id_bodega: 1, cantidad_disponible: 90.0, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 },
-
-    // Stocks para corchetes (id_variante_producto 11 a 15, id_bodega = 1)
-    { id_variante_producto: 11, id_bodega: 1, cantidad_disponible: 500, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 },
-    { id_variante_producto: 12, id_bodega: 1, cantidad_disponible: 300, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 },
-    { id_variante_producto: 13, id_bodega: 1, cantidad_disponible: 150, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 },
-    { id_variante_producto: 14, id_bodega: 1, cantidad_disponible: 200, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 },
-    { id_variante_producto: 15, id_bodega: 1, cantidad_disponible: 100, cantidad_reservada: 0, stock_minimo: 0, stock_maximo: 0 }
-  ];
-
-  await StockPorBodega.bulkCreate(stockData, { ignoreDuplicates: true });
-
-  console.log('✅ Stock inicial insertado');
-}
-async function createModalitiesForExistingVariants() {
-  // Obtener todas las variantes primero (sin include)
-  const variants = await VarianteProducto.findAll();
-
-  const modalidadesToInsert: any[] = [];
-
-  for (const vp of variants) {
-    // En lugar de usar `include`, buscamos el producto por su PK
-    const prod = await Producto.findByPk(vp.id_producto);
-    if (!prod) continue;
-
-    // Extraemos los campos necesarios
-    const precioCostoBase = prod.precio_costo_base || 0;
-    const precioNetoBase = prod.precio_neto_base || 0;
-    const precioNetoFacturaBase = prod.precio_neto_factura_base || 0;
-    const unidad = prod.unidad_medida || 'unidad';
-    const idVar = vp.id_variante_producto;
-
-    // Verificar si ya existen modalidades para esta variante
-    const count = await ModalidadProducto.count({ where: { id_variante_producto: idVar } });
-    if (count > 0) continue;
-
-    if (unidad === 'metro') {
-      modalidadesToInsert.push(
-        {
-          id_variante_producto: idVar,
-          nombre: 'METRO',
-          descripcion: 'Venta al corte por metro',
-          cantidad_base: 1,
-          es_cantidad_variable: true,
-          minimo_cantidad: 0.1,
-          precio_costo: precioCostoBase,
-          precio_neto: precioNetoBase,
-          precio_neto_factura: precioNetoFacturaBase,
-          activa: true
-        },
-        {
-          id_variante_producto: idVar,
-          nombre: 'ROLLO',
-          descripcion: 'Rollo completo',
-          cantidad_base: 25,
-          es_cantidad_variable: false,
-          minimo_cantidad: 25,
-          precio_costo: Math.round(precioCostoBase * 0.9),
-          precio_neto: Math.round(precioNetoBase * 0.9),
-          precio_neto_factura: Math.round(precioNetoFacturaBase * 0.9),
-          activa: true
-        }
-      );
-    } else if (unidad === 'unidad') {
-      modalidadesToInsert.push(
-        {
-          id_variante_producto: idVar,
-          nombre: 'UNIDAD',
-          descripcion: 'Venta por unidad',
-          cantidad_base: 1,
-          es_cantidad_variable: false,
-          minimo_cantidad: 1,
-          precio_costo: precioCostoBase,
-          precio_neto: precioNetoBase,
-          precio_neto_factura: precioNetoFacturaBase,
-          activa: true
-        },
-        {
-          id_variante_producto: idVar,
-          nombre: 'EMBALAJE',
-          descripcion: 'Embalaje completo',
-          cantidad_base: 10,
-          es_cantidad_variable: false,
-          minimo_cantidad: 10,
-          precio_costo: Math.round(precioCostoBase * 0.85),
-          precio_neto: Math.round(precioNetoBase * 0.85),
-          precio_neto_factura: Math.round(precioNetoFacturaBase * 0.85),
-          activa: true
-        }
-      );
-    } else {
-      // Por defecto: solo UNIDAD
-      modalidadesToInsert.push({
-        id_variante_producto: idVar,
-        nombre: 'UNIDAD',
-        descripcion: 'Venta por unidad',
-        cantidad_base: 1,
-        es_cantidad_variable: false,
-        minimo_cantidad: 1,
-        precio_costo: precioCostoBase,
-        precio_neto: precioNetoBase,
-        precio_neto_factura: precioNetoFacturaBase,
-        activa: true
-      });
-    }
+  // Obtener bodega sala de ventas
+  const bodegaSala = await Bodega.findOne({ where: { codigo: 'SALA' } });
+  if (!bodegaSala) {
+    console.log('⚠️  Bodega SALA no encontrada, omitiendo stock');
+    return;
   }
 
-  if (modalidadesToInsert.length > 0) {
-    await ModalidadProducto.bulkCreate(modalidadesToInsert, { ignoreDuplicates: true });
-    console.log('✅ Modalidades automáticas para variantes creadas');
-  } else {
-    console.log('ℹ️ No se necesitó crear modalidades automáticas (ya existen)');
-  }
-}
-
-
-async function adjustModalitiesPrices() {
-  // Actualizar precios específicos para corchetes (medidas 71, 12, 1445, 1450, 8012)
-  // Según SQL:
-  // 71 → costo 85, neto 160, factura 134
-  // 12 → costo 90, neto 170, factura 143
-  // 1445 → costo 120, neto 220, factura 185
-  // 1450 → costo 125, neto 230, factura 193
-  // 8012 → costo 140, neto 250, factura 210
-
-  const mapping: Record<string, { costo: number; neto: number; factura: number }> = {
-    '71': { costo: 85, neto: 160, factura: 134 },
-    '12': { costo: 90, neto: 170, factura: 143 },
-    '1445': { costo: 120, neto: 220, factura: 185 },
-    '1450': { costo: 125, neto: 230, factura: 193 },
-    '8012': { costo: 140, neto: 250, factura: 210 }
-  };
-
-  // Encuentra variantes con esas medidas
-  const variantesCorchetes = await VarianteProducto.findAll({
-    where: { medida: Object.keys(mapping) }
+  // Obtener algunas variantes para darles stock
+  const variantesGucci = await VarianteProducto.findAll({
+    where: { sku: ['LIN-GUCCI-CRU', 'LIN-GUCCI-NEG', 'LIN-GUCCI-AZU'] }
   });
 
-  for (const vp of variantesCorchetes) {
-    const medida = vp.medida!;
-    const data = mapping[medida];
+  const variantesVersace = await VarianteProducto.findAll({
+    where: { sku: ['LIN-GABANNA-CRU', 'LIN-GABANNA-NEG'] }
+  });
 
-    // Obtener todas las modalidades de esta variante
-    const modalidades = await ModalidadProducto.findAll({
-      where: { id_variante_producto: vp.id_variante_producto }
+  const variantesFelpa = await VarianteProducto.findAll({
+    where: { sku: ['FEL-SANTI-GRI', 'FEL-PREMIUM-AZU'] }
+  });
+
+  const variantesCorchetes = await VarianteProducto.findAll({
+    where: { sku: ['COR-7112', 'COR-8012', 'COR-1445'] }
+  });
+
+  // Stock para Gucci
+  for (const variante of variantesGucci) {
+    await StockPorBodega.findOrCreate({
+      where: {
+        id_variante_producto: variante.id_variante_producto,
+        id_bodega: bodegaSala.id_bodega
+      },
+      defaults: {
+        cantidad_disponible: Math.floor(Math.random() * 200) + 50,
+        cantidad_reservada: 0,
+        stock_minimo: 10,
+        stock_maximo: 300
+      }
     });
-
-    for (const mp of modalidades) {
-      // Actualizamos solo si la modalidad existe (p.ej. UNIDAD, EMBALAJE, etc.)
-      await mp.update({
-        precio_costo: data.costo,
-        precio_neto: data.neto,
-        precio_neto_factura: data.factura
-      });
-    }
   }
 
-  console.log('✅ Precios de modalidades de corchetes ajustados');
+  // Stock para Versace
+  for (const variante of variantesVersace) {
+    await StockPorBodega.findOrCreate({
+      where: {
+        id_variante_producto: variante.id_variante_producto,
+        id_bodega: bodegaSala.id_bodega
+      },
+      defaults: {
+        cantidad_disponible: Math.floor(Math.random() * 150) + 30,
+        cantidad_reservada: 0,
+        stock_minimo: 5,
+        stock_maximo: 200
+      }
+    });
+  }
+
+  // Stock para Felpa
+  for (const variante of variantesFelpa) {
+    await StockPorBodega.findOrCreate({
+      where: {
+        id_variante_producto: variante.id_variante_producto,
+        id_bodega: bodegaSala.id_bodega
+      },
+      defaults: {
+        cantidad_disponible: Math.floor(Math.random() * 100) + 20,
+        cantidad_reservada: 0,
+        stock_minimo: 10,
+        stock_maximo: 150
+      }
+    });
+  }
+
+  // Stock para Corchetes (cantidades más altas)
+  for (const variante of variantesCorchetes) {
+    await StockPorBodega.findOrCreate({
+      where: {
+        id_variante_producto: variante.id_variante_producto,
+        id_bodega: bodegaSala.id_bodega
+      },
+      defaults: {
+        cantidad_disponible: Math.floor(Math.random() * 5000) + 1000,
+        cantidad_reservada: 0,
+        stock_minimo: 100,
+        stock_maximo: 10000
+      }
+    });
+  }
+
+  console.log('✅ Stock inicial creado');
+}
+
+async function createModalitiesForExistingVariants() {
+  // Las modalidades se crean por trigger o procedure
+  console.log('✅ Modalidades manejadas por triggers/procedures');
+}
+
+async function adjustModalitiesPrices() {
+  // Ajuste de precios específicos si es necesario
+  console.log('✅ Ajuste de precios completado');
 }

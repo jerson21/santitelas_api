@@ -17,7 +17,9 @@ export const sequelize = new Sequelize({
   dialect: 'mysql',
   dialectOptions: {
     connectTimeout: 60000, // 60 segundos
-    charset: 'utf8mb4'
+    charset: 'utf8mb4',
+    // Permitir ejecutar múltiples sentencias (necesario para cargar procedimientos almacenados)
+    multipleStatements: true
   },
   // Los modelos se registran programáticamente en initializeModels()
   logging: process.env.NODE_ENV === 'development' ? console.log : false,

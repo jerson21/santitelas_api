@@ -2,6 +2,7 @@
 -- SANTITELAS - SISTEMA DE PUNTO DE VENTA
 -- Base de datos completa organizada y optimizada
 -- VERSIÓN CORREGIDA PARA MySQL 8.0 - SIN ERRORES DE SINTAXIS
+-- NOTA: LOS PROCEDURES ESTÁN EN ARCHIVO SEPARADO
 -- ==========================================================
 
 CREATE DATABASE IF NOT EXISTS santitelas;
@@ -35,7 +36,7 @@ DROP TABLE IF EXISTS categorias;
 DROP TABLE IF EXISTS usuarios;
 DROP TABLE IF EXISTS roles;
 
--- Limpiar funciones y procedures existentes
+/* -- Limpiar funciones y procedures existentes
 DROP PROCEDURE IF EXISTS crear_modalidades_para_variante;
 DROP FUNCTION IF EXISTS obtener_precio_modalidad;
 DROP FUNCTION IF EXISTS calcular_stock_total_variante;
@@ -50,7 +51,7 @@ DROP VIEW IF EXISTS vista_productos_completa;
 DROP VIEW IF EXISTS vista_detalle_pedidos_completa;
 DROP VIEW IF EXISTS vista_clientes_datos_pendientes;
 DROP VIEW IF EXISTS vista_stock_productos;
-DROP VIEW IF EXISTS vista_productos_por_tipo;
+DROP VIEW IF EXISTS vista_productos_por_tipo; */
 
 -- Rehabilitar foreign key checks
 SET FOREIGN_KEY_CHECKS = 1;
@@ -607,59 +608,6 @@ END$$
 -- 8. OTRAS FUNCIONES ÚTILES
 -- ==========================================================
 
--- Función: Crear modalidades automáticamente para nueva variante
-CREATE PROCEDURE crear_modalidades_para_variante(
-    IN p_id_variante_producto INT
-)
-BEGIN
-    DECLARE v_id_producto INT;
-    DECLARE v_precio_costo_base DECIMAL(10,0);
-    DECLARE v_precio_neto_base DECIMAL(10,0);
-    DECLARE v_precio_neto_factura_base DECIMAL(10,0);
-    DECLARE v_unidad_medida VARCHAR(20);
-    DECLARE v_count INT DEFAULT 0;
-    
-    -- Verificar si ya existen modalidades para esta variante
-    SELECT COUNT(*) INTO v_count
-    FROM modalidades_producto 
-    WHERE id_variante_producto = p_id_variante_producto;
-    
-    -- Solo crear si no existen modalidades
-    IF v_count = 0 THEN
-        -- Obtener datos del producto padre
-        SELECT p.id_producto, 
-               COALESCE(p.precio_costo_base, 0), 
-               COALESCE(p.precio_neto_base, 0), 
-               COALESCE(p.precio_neto_factura_base, 0), 
-               COALESCE(p.unidad_medida, 'unidad')
-        INTO v_id_producto, v_precio_costo_base, v_precio_neto_base, v_precio_neto_factura_base, v_unidad_medida
-        FROM productos p
-        JOIN variantes_producto vp ON p.id_producto = vp.id_producto
-        WHERE vp.id_variante_producto = p_id_variante_producto;
-        
-        -- Crear modalidades según la unidad de medida
-        IF v_unidad_medida = 'metro' THEN
-            -- Para telas: METRO y ROLLO
-            INSERT IGNORE INTO modalidades_producto (id_variante_producto, nombre, descripcion, cantidad_base, es_cantidad_variable, minimo_cantidad, precio_costo, precio_neto, precio_neto_factura)
-            VALUES 
-                (p_id_variante_producto, 'METRO', 'Venta al corte por metro', 1, TRUE, 0.1, v_precio_costo_base, v_precio_neto_base, v_precio_neto_factura_base),
-                (p_id_variante_producto, 'ROLLO', 'Rollo completo', 25, FALSE, 25, ROUND(v_precio_costo_base * 0.9), ROUND(v_precio_neto_base * 0.9), ROUND(v_precio_neto_factura_base * 0.9));
-        
-        ELSEIF v_unidad_medida = 'unidad' THEN
-            -- Para productos unitarios: UNIDAD y EMBALAJE/SET
-            INSERT IGNORE INTO modalidades_producto (id_variante_producto, nombre, descripcion, cantidad_base, es_cantidad_variable, minimo_cantidad, precio_costo, precio_neto, precio_neto_factura)
-            VALUES 
-                (p_id_variante_producto, 'UNIDAD', 'Venta por unidad', 1, FALSE, 1, v_precio_costo_base, v_precio_neto_base, v_precio_neto_factura_base),
-                (p_id_variante_producto, 'EMBALAJE', 'Embalaje completo', 10, FALSE, 10, ROUND(v_precio_costo_base * 0.85), ROUND(v_precio_neto_base * 0.85), ROUND(v_precio_neto_factura_base * 0.85));
-        
-        ELSE
-            -- Por defecto: solo UNIDAD
-            INSERT IGNORE INTO modalidades_producto (id_variante_producto, nombre, descripcion, cantidad_base, es_cantidad_variable, minimo_cantidad, precio_costo, precio_neto, precio_neto_factura)
-            VALUES (p_id_variante_producto, 'UNIDAD', 'Venta por unidad', 1, FALSE, 1, v_precio_costo_base, v_precio_neto_base, v_precio_neto_factura_base);
-        END IF;
-    END IF;
-END$$
-
 -- Función: Obtener precio según modalidad y tipo de documento
 CREATE FUNCTION obtener_precio_modalidad(
     p_id_modalidad INT, 
@@ -720,12 +668,42 @@ BEGIN
     RETURN v_stock;
 END$$
 
+-- Función: Calcular dinero teórico de turno para arqueos
+CREATE FUNCTION calcular_dinero_teorico_turno(p_id_turno INT)
+RETURNS DECIMAL(10,2)
+READS SQL DATA
+DETERMINISTIC
+BEGIN
+    DECLARE v_monto_inicial DECIMAL(10,2) DEFAULT 0;
+    DECLARE v_total_ventas_efectivo DECIMAL(10,2) DEFAULT 0;
+    DECLARE v_dinero_teorico DECIMAL(10,2) DEFAULT 0;
+    
+    -- Obtener monto inicial del turno
+    SELECT COALESCE(monto_inicial, 0) 
+    INTO v_monto_inicial
+    FROM turnos_caja 
+    WHERE id_turno = p_id_turno;
+    
+    -- Calcular total de ventas en efectivo del turno
+    SELECT COALESCE(SUM(p.monto), 0)
+    INTO v_total_ventas_efectivo
+    FROM ventas v
+    JOIN pagos p ON v.id_venta = p.id_venta
+    JOIN metodos_pago mp ON p.id_metodo_pago = mp.id_metodo
+    WHERE v.id_turno = p_id_turno
+    AND v.estado = 'completada'
+    AND mp.tipo = 'efectivo';
+    
+    SET v_dinero_teorico = v_monto_inicial + v_total_ventas_efectivo;
+    
+    RETURN v_dinero_teorico;
+END$$
+
 DELIMITER ;
 
 -- ==========================================================
 -- 9. TRIGGERS PARA AUTOMATIZACIÓN
 -- ==========================================================
-
 DELIMITER $$
 
 -- Trigger: Crear modalidades automáticamente al crear variante
@@ -954,165 +932,7 @@ JOIN usuarios u ON p.id_vendedor = u.id_usuario
 LEFT JOIN clientes c ON p.id_cliente = c.id_cliente
 ORDER BY p.fecha_creacion DESC, p.numero_diario DESC;
 
--- ==========================================================
--- 11. DATOS INICIALES
--- ==========================================================
 
--- Roles del sistema
-INSERT INTO roles (nombre, descripcion, permisos) VALUES
-('ADMINISTRADOR', 'Acceso completo al sistema', '["admin", "ventas", "productos", "usuarios"]'),
-('CAJERO', 'Acceso a ventas y caja', '["ventas", "pagos"]'),
-('VENDEDOR', 'Acceso a pedidos y productos', '["pedidos", "productos.ver"]');
-
--- Usuarios del sistema con hashes correctos para cada contraseña
-INSERT INTO usuarios (usuario, password_hash, nombre_completo, email, id_rol) VALUES
--- admin / admin123
-('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMye1jrwtMNOySDEb8K9yJ3TksE7nQP/nOa', 'Administrador del Sistema', 'admin@santitelas.cl', 1),
--- cajero1 / cajero123  
-('cajero1', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'María González', 'maria@santitelas.cl', 2),
--- vendedor1 / vendedor123
-('vendedor1', '$2a$10$K7L/dW2vs70QrBhJBgUoJ.QDWG7kqfz7UWRwLnUwQrKb.6LXQ6YS6', 'Juan Pérez', 'juan@santitelas.cl', 3);
-
--- Categorías de productos
-INSERT INTO categorias (nombre, descripcion) VALUES
-('TELAS', 'Diferentes tipos de telas y materiales'),
-('BOTONES', 'Botones de diferentes tipos y tamaños'),
-('PATAS', 'Patas y accesorios de costura'),
-('CORCHETES', 'Corchetes metálicos de diferentes medidas'),
-('HILOS', 'Hilos y elementos de bordado');
-
--- Tipos de documento
-INSERT INTO tipos_documento (nombre, codigo, requiere_rut_cliente, es_fiscal, aplica_iva) VALUES
-('Ticket', 'TIC', FALSE, FALSE, FALSE),
-('Boleta', 'BOL', FALSE, TRUE, FALSE),
-('Factura', 'FAC', TRUE, TRUE, TRUE);
-
--- Bodegas
-INSERT INTO bodegas (codigo, nombre, descripcion, es_punto_venta) VALUES
-('SALA', 'Sala de Ventas', 'Punto de venta principal', TRUE),
-('BOD1', 'Bodega Principal', 'Bodega Temuco', FALSE),
-('BOD2', 'Bodega Secundaria', 'Bodega Lirquen', FALSE);
-
--- Métodos de pago
-INSERT INTO metodos_pago (nombre, codigo, tipo, requiere_referencia) VALUES
-('Efectivo', 'EFE', 'efectivo', FALSE),
-('Tarjeta Débito', 'DEB', 'tarjeta', TRUE),
-('Tarjeta Crédito', 'CRE', 'tarjeta', TRUE),
-('Transferencia', 'TRA', 'transferencia', TRUE);
-
--- Cajas registradoras
-INSERT INTO cajas (nombre, ubicacion, activa) VALUES
-('Caja Principal', 'Mostrador Principal', TRUE),
-('Caja 1', 'Meson 1', TRUE),
-('Caja 2', 'Meson 2', TRUE),
-('Caja 3', 'Meson 3', TRUE),
-('Caja Secundaria', 'Mostrador Auxiliar', TRUE);
-
--- ==========================================================
--- 12. PRODUCTOS DE EJEMPLO
--- ==========================================================
-
--- PRODUCTOS BASE CON PLANTILLAS DE PRECIOS
-INSERT INTO productos (codigo, nombre, descripcion, id_categoria, tipo, unidad_medida, precio_costo_base, precio_neto_base, precio_neto_factura_base) VALUES
--- TELAS (precios iguales para todas las variantes)
-('LIN-GUCCI-001', 'GUCCI', 'Línea GUCCI de telas de lino premium', 1, 'LINO', 'metro', 2500, 3800, 3193),
-('LIN-VERSACE-001', 'VERSACE', 'Línea VERSACE de telas de lino', 1, 'LINO', 'metro', 2300, 3500, 2941),
-('FEL-PREMIUM-001', 'PREMIUM', 'Línea premium de felpa suave', 1, 'FELPA', 'metro', 1800, 2500, 2101),
-
--- CORCHETES (cada medida tendrá precio diferente)
-('COR-MEDIDAS-001', 'Corchetes Varios', 'Corchetes metálicos de diferentes medidas', 4, 'CORCHETES', 'unidad', 100, 150, 126),
-
--- OTROS PRODUCTOS
-('ACC-BOT-001', 'Botones Clásicos', 'Botones básicos para confección', 2, NULL, 'unidad', 100, 150, 126),
-('HIL-ALG-001', 'Hilo Algodón', 'Hilo de algodón para costura', 5, NULL, 'unidad', 300, 450, 378),
-('PAT-MAD-001', 'Pata Madera', 'Patas de madera para muebles', 3, 'MADERA', 'unidad', 500, 800, 672);
-
--- VARIANTES DE PRODUCTOS
-INSERT INTO variantes_producto (id_producto, sku, color, medida, descripcion) VALUES
--- LINO GUCCI - Todos heredarán el mismo precio
-(1, 'LIN-GUCCI-BLA', 'Blanco', NULL, 'Lino Gucci color Blanco'),
-(1, 'LIN-GUCCI-NEG', 'Negro', NULL, 'Lino Gucci color Negro'),
-(1, 'LIN-GUCCI-AZU', 'Azul', NULL, 'Lino Gucci color Azul'),
-(1, 'LIN-GUCCI-ROJ', 'Rojo', NULL, 'Lino Gucci color Rojo'),
-(1, 'LIN-GUCCI-VER', 'Verde', NULL, 'Lino Gucci color Verde'),
-
--- LINO VERSACE
-(2, 'LIN-VERSACE-BLA', 'Blanco', NULL, 'Lino Versace color Blanco'),
-(2, 'LIN-VERSACE-NEG', 'Negro', NULL, 'Lino Versace color Negro'),
-(2, 'LIN-VERSACE-DOR', 'Dorado', NULL, 'Lino Versace color Dorado'),
-
--- FELPA PREMIUM  
-(3, 'FEL-PREMIUM-GRI', 'Gris', NULL, 'Felpa premium color Gris'),
-(3, 'FEL-PREMIUM-AZU', 'Azul', NULL, 'Felpa premium color Azul'),
-
--- CORCHETES - Cada medida tendrá precio diferente
-(4, 'COR-71', NULL, '71', 'Corchete medida 71'),
-(4, 'COR-12', NULL, '12', 'Corchete medida 12'),
-(4, 'COR-1445', NULL, '1445', 'Corchete medida 1445'),
-(4, 'COR-1450', NULL, '1450', 'Corchete medida 1450'),
-(4, 'COR-8012', NULL, '8012', 'Corchete medida 8012'),
-
--- OTROS PRODUCTOS
-(5, 'ACC-BOT-NE', 'Negro', NULL, 'Botones negros clásicos'),
-(5, 'ACC-BOT-BL', 'Blanco', NULL, 'Botones blancos clásicos'),
-(6, 'HIL-ALG-BL', 'Blanco', NULL, 'Hilo algodón blanco'),
-(6, 'HIL-ALG-NE', 'Negro', NULL, 'Hilo algodón negro'),
-(7, 'PAT-MAD-NAT', 'Natural', NULL, 'Pata madera natural'),
-(7, 'PAT-MAD-TEÑ', 'Teñida', NULL, 'Pata madera teñida');
-
--- Cliente ejemplo
-INSERT INTO clientes (rut, tipo_cliente, nombre, datos_completos) VALUES
-('12345678-9', 'empresa', 'Cliente por completar datos', FALSE);
-
--- Stock inicial para algunas variantes
-INSERT INTO stock_por_bodega (id_variante_producto, id_bodega, cantidad_disponible) VALUES
--- Stocks para LINO GUCCI en sala de ventas
-(1, 1, 150.0), -- Blanco
-(2, 1, 120.0), -- Negro  
-(3, 1, 80.0),  -- Azul
-(4, 1, 200.0), -- Rojo
-(5, 1, 90.0),  -- Verde
-
--- Stocks para corchetes
-(11, 1, 500), -- Corchete 71
-(12, 1, 300), -- Corchete 12
-(13, 1, 150), -- Corchete 1445
-(14, 1, 200), -- Corchete 1450
-(15, 1, 100); -- Corchete 8012
-
--- ==========================================================
--- 13. AJUSTES FINALES DE PRECIOS
--- ==========================================================
-
--- Actualizar precios específicos para corchetes (diferentes por medida)
-UPDATE modalidades_producto mp
-JOIN variantes_producto vp ON mp.id_variante_producto = vp.id_variante_producto
-SET 
-    mp.precio_costo = CASE vp.medida
-        WHEN '71' THEN 85
-        WHEN '12' THEN 90
-        WHEN '1445' THEN 120
-        WHEN '1450' THEN 125
-        WHEN '8012' THEN 140
-        ELSE mp.precio_costo
-    END,
-    mp.precio_neto = CASE vp.medida
-        WHEN '71' THEN 160
-        WHEN '12' THEN 170
-        WHEN '1445' THEN 220
-        WHEN '1450' THEN 230
-        WHEN '8012' THEN 250
-        ELSE mp.precio_neto
-    END,
-    mp.precio_neto_factura = CASE vp.medida
-        WHEN '71' THEN 134
-        WHEN '12' THEN 143
-        WHEN '1445' THEN 185
-        WHEN '1450' THEN 193
-        WHEN '8012' THEN 210
-        ELSE mp.precio_neto_factura
-    END
-WHERE vp.medida IN ('71', '12', '1445', '1450', '8012');
 
 -- ==========================================================
 -- 14. VERIFICACIÓN FINAL
@@ -1163,3 +983,11 @@ SELECT
     'VP' AS prefijo_vales,
     'VT' AS prefijo_ventas,
     'Los números diarios se reinician cada día' AS nota;
+
+-- ==========================================================
+-- 🔔 NOTA IMPORTANTE: 
+-- Los PROCEDURES han sido movidos a: procedures_santitelas.sql
+-- Para cargar la base de datos completa ejecutar:
+-- 1. Este archivo primero (santitelas_sin_procedures.sql)
+-- 2. Luego el archivo de procedures (procedures_santitelas.sql)
+-- ==========================================================

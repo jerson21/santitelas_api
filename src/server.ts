@@ -26,7 +26,7 @@ const io = new Server(server, {
 // Middlewares globales
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL?.split(',') || ["http://localhost:3000", "http://localhost:3001", "http://localhost:3002"],
+  origin: process.env.FRONTEND_URL?.split(',') || ["http://localhost:3000", "http://localhost:3001", "http://localhost:3002",],
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -125,6 +125,8 @@ app.use('*', (req, res) => {
   });
 });
 
+
+
 // ✅ FUNCIÓN CORREGIDA PARA INICIALIZAR LA BASE DE DATOS
 async function initializeDatabase() {
   try {
@@ -141,23 +143,18 @@ async function initializeDatabase() {
     setupAssociations();
     console.log('✅ Asociaciones configuradas');
     
-    // Sincronizar esquema de base de datos
-    console.log('🔄 Sincronizando esquema de base de datos...');
-    if (process.env.SEED_DATABASE === 'true') {
-      console.log('🗑️  SEED_DATABASE=true: eliminando y recreando tablas (force sync)...');
-      await sequelize.sync({ force: true });
-      console.log('✅ Tablas recreadas fresh (force sync)');
-    } else {
-      console.log('⚙️  Ajustando esquema con alter...');
-      await sequelize.sync({ alter: true });
-      console.log('✅ Base de datos sincronizada (esquema ajustado)');
-    }
+    // NO HACER FORCE SYNC - Las tablas ya vienen del SQL
+    console.log('🔄 Verificando esquema de base de datos...');
+    
+    // Solo sincronizar sin force (no elimina datos)
+    await sequelize.sync({ alter: false });
+    console.log('✅ Base de datos sincronizada');
 
     // Sembrar datos iniciales si SEED_DATABASE=true
     if (process.env.SEED_DATABASE === 'true') {
-      console.log('🌱 Sembrando datos iniciales...');
-      await seedDatabase();
-      console.log('✅ Datos iniciales sembrados');
+      console.log('🌱 Ejecutando seeder...');
+    await seedDatabase();
+      console.log('✅ Seeder completado');
     }
     
     return true;
@@ -166,7 +163,6 @@ async function initializeDatabase() {
     throw error;
   }
 }
-
 // Función principal de inicio
 async function startServer() {
   try {

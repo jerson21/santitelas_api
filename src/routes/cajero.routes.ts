@@ -158,30 +158,49 @@ async function buscarValePorNumero(numeroVale: string, transaction?: any): Promi
 }
 
 // --- Helper: generar número de venta seguro ---
-async function generarNumeroVenta(transaction?: Transaction): Promise<string> {
-  const año = new Date().getFullYear();
+async function generarNumeroVenta(transaction?: Transaction, fechaVale?: Date): Promise<string> {
+  // CAMBIO: Usar la fecha del vale si se proporciona, sino usar fecha actual
+  const fechaBase = fechaVale || new Date();
+  const año = fechaBase.getFullYear();
+  const mes = String(fechaBase.getMonth() + 1).padStart(2, '0');
+  const dia = String(fechaBase.getDate()).padStart(2, '0');
+  
   try {
+    // Intentar usar el procedimiento almacenado primero
     const resultados = await sequelize.query(
-      'SELECT generar_numero_venta() as numero',
-      { transaction }
+      'SELECT generar_numero_venta(?) as numero',
+      { 
+        replacements: [fechaBase.toISOString().split('T')[0]], // Pasar fecha como parámetro
+        transaction 
+      }
     ) as any[];
-    return resultados[0]?.[0]?.numero || `${año}0101-0001`;
-  } catch (error) {
-    const ultimaVenta = await Venta.findOne({
-      where: {
-        numero_venta: { [Op.like]: `${año}%` }
-      },
-      order: [['numero_venta', 'DESC']],
-      transaction
-    });
-    let numeroSecuencial = 1;
-    if (ultimaVenta) {
-      const match = ultimaVenta.numero_venta.match(/-(\d+)$/);
-      if (match) numeroSecuencial = parseInt(match[1]) + 1;
+    
+    if (resultados[0]?.[0]?.numero) {
+      return resultados[0][0].numero;
     }
-    const fecha = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    return `${fecha}-${numeroSecuencial.toString().padStart(4, '0')}`;
+  } catch (error) {
+    console.log('Procedimiento almacenado falló, usando fallback manual');
   }
+  
+  // Fallback manual mejorado
+  const prefijo = `VT${año}${mes}${dia}`;
+  
+  // Buscar el último número de venta DE ESA FECHA ESPECÍFICA
+  const ultimaVenta = await Venta.findOne({
+    where: {
+      numero_venta: { [Op.like]: `${prefijo}-%` }
+    },
+    order: [['numero_venta', 'DESC']],
+    transaction
+  });
+  
+  let numeroSecuencial = 1;
+  if (ultimaVenta) {
+    const match = ultimaVenta.numero_venta.match(/-(\d+)$/);
+    if (match) numeroSecuencial = parseInt(match[1]) + 1;
+  }
+  
+  return `${prefijo}-${numeroSecuencial.toString().padStart(4, '0')}`;
 }
 
 // --------------------------- ENDPOINTS ---------------------------
@@ -390,7 +409,7 @@ router.post('/procesar-vale/:numeroVale', [
     await vale.update(datosActualizados, { transaction });
 
     // 8. Venta oficial
-    const numeroVenta = await generarNumeroVenta(transaction);
+const numeroVenta = await generarNumeroVenta(transaction, vale.fecha_creacion);
     let iva = 0;
     if (tipoDoc.aplica_iva) {
       iva = Math.round((totalFinal - descuento) * 0.19);
@@ -466,6 +485,8 @@ router.post('/procesar-vale/:numeroVale', [
 // ✅ ======================================================================
 // ✅ ENDPOINT MEJORADO: /vale/:numeroVale/detalles
 // ✅ ======================================================================
+// En cajero.routes.ts - ACTUALIZACIÓN del endpoint /vale/:numeroVale/detalles
+
 router.get('/vale/:numeroVale/detalles', [
   param('numeroVale').isString().notEmpty().withMessage('Número de vale requerido'),
   handleValidationErrors
@@ -515,7 +536,15 @@ router.get('/vale/:numeroVale/detalles', [
           model: Cliente,
           as: 'cliente',
           attributes: [
-            'rut', 'nombre', 'razon_social', 'telefono', 'email', 'direccion', 'tipo_cliente'
+            'id_cliente',
+            'rut', 
+            'nombre', 
+            'razon_social', 
+            'telefono', 
+            'email', 
+            'direccion', 
+            'tipo_cliente',
+            'datos_completos'
           ],
           required: false
         },
@@ -554,6 +583,8 @@ router.get('/vale/:numeroVale/detalles', [
     }
 
     console.log(`✅ Vale encontrado: ${vale.numero_pedido} (Diario: ${vale.numero_diario})`);
+    console.log(`👤 Cliente asociado: ${vale.cliente ? `${vale.cliente.nombre || vale.cliente.razon_social} (${vale.cliente.rut})` : 'Sin cliente'}`);
+    console.log(`📝 Datos completos: ${vale.datos_completos ? 'Sí' : 'No'}`);
     
     // 4. Formatear respuesta
     const detallesFormateados = {
@@ -576,19 +607,34 @@ router.get('/vale/:numeroVale/detalles', [
         ? `⚠️ Este vale es de hace ${resultadoBusqueda.diasAtras} días`
         : null,
       
+      // ✅ INFORMACIÓN DEL CLIENTE MEJORADA
       cliente_info: vale.cliente ? {
         tiene_cliente: true,
+        id_cliente: vale.cliente.id_cliente,
         rut: vale.cliente.rut,
-        nombre: vale.cliente.nombre,
+        nombre: vale.cliente.nombre || vale.cliente.razon_social || 'Sin nombre',
         razon_social: vale.cliente.razon_social,
         telefono: vale.cliente.telefono,
         email: vale.cliente.email,
         direccion: vale.cliente.direccion,
-        tipo_cliente: vale.cliente.tipo_cliente
+        tipo_cliente: vale.cliente.tipo_cliente,
+        datos_completos: vale.cliente.datos_completos,
+        requiere_completar: !vale.cliente.datos_completos,
+        mensaje: vale.cliente.datos_completos 
+          ? '✅ Cliente con datos completos' 
+          : '⚠️ Faltan datos del cliente'
       } : {
         tiene_cliente: false,
-        requiere_datos: vale.tipo_documento === 'factura'
+        requiere_datos: vale.tipo_documento === 'factura',
+        mensaje: vale.tipo_documento === 'factura' 
+          ? '❌ Factura requiere datos del cliente' 
+          : 'ℹ️ Sin cliente asociado'
       },
+      
+      // ✅ NUEVO: Indicador de datos completos del pedido
+      datos_completos: vale.datos_completos,
+      requiere_accion_cajero: !vale.datos_completos || (vale.tipo_documento === 'factura' && !vale.cliente),
+      
       productos: vale.detalles?.map(detalle => ({
         producto: detalle.varianteProducto?.producto?.nombre || 'Producto no encontrado',
         codigo: detalle.varianteProducto?.producto?.codigo,
@@ -625,7 +671,24 @@ router.get('/vale/:numeroVale/detalles', [
       notas_vendedor: vale.observaciones,
       tiempo_espera: Math.floor(
         (new Date().getTime() - new Date(vale.fecha_creacion).getTime()) / 60000
-      )
+      ),
+      
+      // ✅ NUEVO: Instrucciones para el cajero
+      instrucciones_cajero: (() => {
+        const instrucciones = [];
+        
+        if (!vale.datos_completos) {
+          if (vale.tipo_documento === 'factura' && !vale.cliente) {
+            instrucciones.push('🔴 OBLIGATORIO: Solicitar RUT y razón social del cliente para factura');
+          } else if (vale.cliente && !vale.cliente.datos_completos) {
+            instrucciones.push('⚠️ Completar datos faltantes del cliente');
+          } else if (!vale.cliente) {
+            instrucciones.push('ℹ️ Opcionalmente puede agregar datos del cliente');
+          }
+        }
+        
+        return instrucciones;
+      })()
     };
     
     res.json({ success: true, data: detallesFormateados });

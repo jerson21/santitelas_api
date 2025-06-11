@@ -14,6 +14,7 @@ RUN npm install
 
 # Copiar código fuente
 COPY src/ ./src/
+COPY database/ ./database/
 
 # Compilar TypeScript
 RUN npm run build

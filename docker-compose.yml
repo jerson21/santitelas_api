@@ -16,20 +16,37 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ./database:/docker-entrypoint-initdb.d
+      - ./logs/mysql:/var/log/mysql  # Para logs de debug
     networks:
       - santitelas-network
     command: >
       --default-authentication-plugin=mysql_native_password
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
-      --innodb-buffer-pool-size=128M
-      --max-connections=50
+      --innodb-buffer-pool-size=256M
+      --max-connections=100
+      --log-bin-trust-function-creators=1
+      --skip-log-bin
+      --max_allowed_packet=256M
+      --connect_timeout=600
+      --wait_timeout=28800
+      --interactive_timeout=28800
+      --net_read_timeout=600
+      --net_write_timeout=600
+      --innodb_lock_wait_timeout=600
+      --innodb_log_file_size=256M
+      --innodb_flush_log_at_trx_commit=2
+      --slow_query_log=1
+      --slow_query_log_file=/var/log/mysql/slow.log
+      --general_log=0
+      --general_log_file=/var/log/mysql/general.log
+      
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-psantitelas_root_2024"]
-      timeout: 10s
-      retries: 5
+      timeout: 20s
+      retries: 10
       interval: 10s
-      start_period: 100s
+      start_period: 120s
 
   # ===== PHPMYADMIN =====
   phpmyadmin:
@@ -41,6 +58,9 @@ services:
       PMA_PORT: 3306
       PMA_USER: root
       PMA_PASSWORD: santitelas_root_2024
+      UPLOAD_LIMIT: 300M  # Para importar archivos grandes
+      MEMORY_LIMIT: 512M
+      MAX_EXECUTION_TIME: 600
     ports:
       - "8080:80"
     depends_on:
@@ -66,6 +86,14 @@ services:
       DB_NAME: santitelas
       DB_USER: santitelas_user
       DB_PASS: santitelas_pass_2024
+      
+      # Timeouts para la conexión de la API
+      DB_CONNECTION_TIMEOUT: 60000
+      DB_REQUEST_TIMEOUT: 300000
+      DB_POOL_MIN: 2
+      DB_POOL_MAX: 10
+      DB_POOL_IDLE: 10000
+      DB_POOL_ACQUIRE: 60000
 
       # JWT
       JWT_SECRET: santitelas_jwt_secret_2024_muy_seguro
@@ -74,8 +102,9 @@ services:
       # Frontend URLs
       FRONTEND_URL: http://localhost:3000,http://localhost:3001
 
-      # Seeder
+      # Configuración de entornos
       SEED_DATABASE: true
+      FORCE_DEVELOPMENT_DATA: true
 
     ports:
       - "5000:5000"
@@ -84,6 +113,9 @@ services:
         condition: service_healthy
     networks:
       - santitelas-network
+    volumes:
+      - ./src:/app/src  # Para hot reload en desarrollo
+      - ./logs/api:/app/logs  # Para logs de la API
 
 # ===== VOLÚMENES =====
 volumes:
@@ -94,3 +126,50 @@ volumes:
 networks:
   santitelas-network:
     driver: bridge
+
+# ===========================================
+# CONFIGURACIÓN ADICIONAL EXPLICADA:
+# ===========================================
+# 
+# TIMEOUTS MySQL:
+# - connect_timeout: Tiempo para establecer conexión inicial
+# - wait_timeout: Tiempo máximo de inactividad para conexiones
+# - interactive_timeout: Similar a wait_timeout para clientes interactivos
+# - net_read_timeout: Tiempo máximo para leer del cliente
+# - net_write_timeout: Tiempo máximo para escribir al cliente
+# - innodb_lock_wait_timeout: Tiempo de espera para locks de InnoDB
+# 
+# OPTIMIZACIONES:
+# - innodb_buffer_pool_size: Aumentado a 256M para mejor performance
+# - max_allowed_packet: 256M para queries grandes
+# - innodb_log_file_size: 256M para transacciones grandes
+# - innodb_flush_log_at_trx_commit: 2 para mejor performance (menos seguro)
+# 
+# LOGS:
+# - slow_query_log: Activado para identificar queries lentas
+# - general_log: Desactivado por defecto (activar solo para debug)
+# 
+# COMANDOS ÚTILES ACTUALIZADOS:
+# 
+# INICIAR TODO:
+# docker-compose up -d
+# 
+# VER LOGS EN TIEMPO REAL:
+# docker-compose logs -f mysql
+# docker-compose logs -f api
+# 
+# VERIFICAR QUERIES LENTAS:
+# docker exec santitelas-mysql tail -f /var/log/mysql/slow.log
+# 
+# CONECTAR A MySQL:
+# docker exec -it santitelas-mysql mysql -uroot -psantitelas_root_2024 santitelas
+# 
+# REINICIAR CON LIMPIEZA COMPLETA:
+# docker-compose down -v --remove-orphans && docker-compose up -d --build
+# 
+# BACKUP DE LA BASE DE DATOS:
+# docker exec santitelas-mysql mysqldump -uroot -psantitelas_root_2024 --single-transaction --routines --triggers santitelas > backup_$(date +%Y%m%d_%H%M%S).sql
+# 
+# RESTAURAR BACKUP:
+# docker exec -i santitelas-mysql mysql -uroot -psantitelas_root_2024 santitelas < backup.sql
+# ===========================================

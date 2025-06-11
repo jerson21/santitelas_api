@@ -8,6 +8,7 @@ import { Categoria } from '../models/Categoria.model';
 import { StockPorBodega } from '../models/StockPorBodega.model';
 import { Bodega } from '../models/Bodega.model';
 import { Op } from 'sequelize';
+import { sequelize } from '../config/database'; // ✅ AGREGADO
 
 const router = Router();
 
@@ -105,6 +106,11 @@ router.use(auth);
  *       '200':
  *         description: Catálogo de productos con estructura jerárquica
  */
+
+
+
+
+
 router.get('/catalogo', async (req, res, next) => {
   try {
     const {
@@ -127,25 +133,75 @@ router.get('/catalogo', async (req, res, next) => {
     const whereVariante: any = { activo: true };
     const whereModalidades: any = { activa: true };
 
-    // Filtros de producto
+    // Configurar include de categoría
+    const includeCategoria: any = {
+      model: Categoria,
+      as: 'categoria',
+      attributes: ['id_categoria', 'nombre'],
+      required: true // Asegurar que siempre esté presente
+    };
+
+    // Si hay filtro de categoría, aplicarlo
     if (categoria) {
-      whereProducto['$categoria.nombre$'] = categoria;
+      includeCategoria.where = { nombre: categoria };
     }
+
+    // Filtros de producto
     if (tipo) {
       whereProducto.tipo = tipo;
     }
     if (modelo) {
-      whereProducto.nombre = { [Op.iLike]: `%${modelo}%` };
+      whereProducto.nombre = { [Op.like]: `%${modelo}%` }; // ✅ Cambiado a like
     }
+    
+    // ✅ BÚSQUEDA MEJORADA - Buscar en productos O variantes
     if (search) {
-      whereProducto[Op.or] = [
-        { nombre: { [Op.iLike]: `%${search}%` } },
-        { codigo: { [Op.iLike]: `%${search}%` } },
-        { descripcion: { [Op.iLike]: `%${search}%` } }
-      ];
+      // Primero, buscar productos que coincidan directamente
+      const productosDirectos = await Producto.findAll({
+        attributes: ['id_producto'],
+        where: {
+          activo: true,
+          [Op.or]: [
+            { nombre: { [Op.like]: `%${search}%` } },
+            { codigo: { [Op.like]: `%${search}%` } },
+            { descripcion: { [Op.like]: `%${search}%` } },
+            { tipo: { [Op.like]: `%${search}%` } }
+          ]
+        },
+        raw: true
+      });
+
+      // Luego, buscar productos que tengan variantes que coincidan
+      const productosConVariantes = await VarianteProducto.findAll({
+        attributes: [[sequelize.fn('DISTINCT', sequelize.col('id_producto')), 'id_producto']],
+        where: {
+          activo: true,
+          [Op.or]: [
+            { color: { [Op.like]: `%${search}%` } },
+            { medida: { [Op.like]: `%${search}%` } },
+            { material: { [Op.like]: `%${search}%` } },
+            { sku: { [Op.like]: `%${search}%` } }
+          ]
+        },
+        raw: true
+      });
+
+      // Combinar los IDs únicos
+      const todosLosIds = new Set([
+        ...productosDirectos.map(p => p.id_producto),
+        ...productosConVariantes.map(p => p.id_producto)
+      ]);
+
+      // Si hay resultados, filtrar solo por esos IDs
+      if (todosLosIds.size > 0) {
+        whereProducto.id_producto = { [Op.in]: Array.from(todosLosIds) };
+      } else {
+        // No hay resultados - asegurar que no se devuelva nada
+        whereProducto.id_producto = { [Op.in]: [] };
+      }
     }
 
-    // Filtros de variante (opciones)
+    // Filtros de variante específicos
     if (color) whereVariante.color = color;
     if (medida) whereVariante.medida = medida;
 
@@ -162,23 +218,18 @@ router.get('/catalogo', async (req, res, next) => {
     // Paginación
     const offset = (Number(page) - 1) * Number(limit);
 
-    // ✅ CONSULTA CORREGIDA: Modalidades desde variantes
+    // Consulta principal - con ORDER BY simplificado
     const { count, rows: productos } = await Producto.findAndCountAll({
       where: whereProducto,
       include: [
-        {
-          model: Categoria,
-          as: 'categoria',
-          attributes: ['id_categoria', 'nombre']
-        },
+        includeCategoria,
         {
           model: VarianteProducto,
           as: 'variantes',
           where: whereVariante,
-          required: true,
+          required: !search && Object.keys(whereVariante).length > 1, // ✅ Mejorado
           include: [
             {
-              // ✅ MODALIDADES DESDE VARIANTES
               model: ModalidadProducto,
               as: 'modalidades',
               where: whereModalidades,
@@ -205,30 +256,27 @@ router.get('/catalogo', async (req, res, next) => {
       limit: Number(limit),
       offset: offset,
       distinct: true,
+      // ORDER BY simplificado sin referencias a joins
       order: [
-        [{ model: Categoria, as: 'categoria' }, 'nombre', 'ASC'],
         ['tipo', 'ASC'],
         ['nombre', 'ASC']
       ]
     });
 
-    // Procesar datos para estructura jerárquica
+    // Procesar datos y ordenar por categoría en memoria si es necesario
     const catalogoEstructurado = productos.map(producto => {
       const productData = producto.toJSON();
 
-      // ✅ OBTENER MODALIDADES DESDE VARIANTES
       const todasModalidades: any[] = [];
       const variantes = productData.variantes.map((variante: any) => {
         const stockTotal = variante.stockPorBodega?.reduce(
           (sum: number, stock: any) => sum + stock.cantidad_disponible, 0
         ) || 0;
 
-        // Filtrar por stock si es necesario
         if (con_stock === 'true' && stockTotal === 0) {
           return null;
         }
 
-        // Recopilar modalidades de esta variante
         const modalidadesVariante = variante.modalidades || [];
         todasModalidades.push(...modalidadesVariante);
 
@@ -259,7 +307,6 @@ router.get('/catalogo', async (req, res, next) => {
         };
       }).filter(Boolean);
 
-      // Calcular rango de precios desde todas las modalidades
       const todosPrecios = todasModalidades
         .map((m: any) => m.precio_neto)
         .filter(Boolean);
@@ -289,6 +336,20 @@ router.get('/catalogo', async (req, res, next) => {
           tiene_stock: variantes.some((v: any) => v.tiene_stock)
         }
       };
+    });
+
+    // Ordenar por categoría en memoria
+    catalogoEstructurado.sort((a, b) => {
+      // Primero por categoría
+      const catComp = a.categoria.localeCompare(b.categoria);
+      if (catComp !== 0) return catComp;
+      
+      // Luego por tipo
+      const tipoComp = (a.tipo || '').localeCompare(b.tipo || '');
+      if (tipoComp !== 0) return tipoComp;
+      
+      // Finalmente por modelo
+      return a.modelo.localeCompare(b.modelo);
     });
 
     // Información de paginación
@@ -626,17 +687,17 @@ router.get('/buscar/rapida', async (req, res, next) => {
       });
     }
 
-    // ✅ CONSULTA CORREGIDA: Modalidades desde variantes
+    // ✅ CONSULTA CORREGIDA: Búsqueda con like para MySQL
     const productos = await Producto.findAll({
       where: {
         [Op.and]: [
           { activo: true },
           {
             [Op.or]: [
-              { nombre: { [Op.iLike]: `%${q}%` } },
-              { codigo: { [Op.iLike]: `%${q}%` } },
-              { tipo: { [Op.iLike]: `%${q}%` } },
-              { descripcion: { [Op.iLike]: `%${q}%` } }
+              { nombre: { [Op.like]: `%${q}%` } },      // ✅ Cambiado a like
+              { codigo: { [Op.like]: `%${q}%` } },      // ✅ Cambiado a like
+              { tipo: { [Op.like]: `%${q}%` } },        // ✅ Cambiado a like
+              { descripcion: { [Op.like]: `%${q}%` } }  // ✅ Cambiado a like
             ]
           }
         ]

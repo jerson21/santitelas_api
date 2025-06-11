@@ -5,6 +5,7 @@ import { Producto } from '../models/Producto.model';
 import { VarianteProducto } from '../models/VarianteProducto.model';
 import { ModalidadProducto } from '../models/ModalidadProducto.model';
 import { Categoria } from '../models/Categoria.model';
+import { Cliente } from '../models/Cliente.model';
 import { StockPorBodega } from '../models/StockPorBodega.model';
 import { Bodega } from '../models/Bodega.model';
 import { Op } from 'sequelize';
@@ -46,9 +47,9 @@ router.get('/productos', async (req, res, next) => {
     }
     if (search) {
       whereProducto[Op.or] = [
-        { nombre: { [Op.iLike]: `%${search}%` } },
-        { codigo: { [Op.iLike]: `%${search}%` } }
-      ];
+  { nombre: { [Op.like]: `%${search}%` } },
+  { codigo: { [Op.like]: `%${search}%` } }
+];
     }
     if (bodega_id) {
       whereStock.id_bodega = bodega_id;
@@ -399,11 +400,11 @@ router.get('/buscar', async (req, res, next) => {
         [Op.and]: [
           { activo: true },
           {
-            [Op.or]: [
-              { nombre: { [Op.iLike]: `%${q}%` } },
-              { codigo: { [Op.iLike]: `%${q}%` } },
-              { tipo: { [Op.iLike]: `%${q}%` } }
-            ]
+        [Op.or]: [
+  { nombre: { [Op.like]: `%${q}%` } },
+  { codigo: { [Op.like]: `%${q}%` } },
+  { tipo: { [Op.like]: `%${q}%` } }
+]
           }
         ]
       },
@@ -627,14 +628,11 @@ router.get('/categorias', async (req, res, next) => {
   }
 });
 
-/**
- * @openapi
- * /vendedor/pedido-rapido:
- *   post:
- *     summary: Crear pedido rápido (vale) con numeración diaria
- */
+/// En vendedor.routes.ts - REEMPLAZO COMPLETO del endpoint pedido-rapido
+
 router.post('/pedido-rapido', async (req, res, next) => {
-  const { tipo_documento, detalles } = req.body;
+  // ✅ MODIFICADO: Ahora recibe datos del cliente
+  const { tipo_documento, detalles, cliente } = req.body;
 
   try {
     // ✅ 1) VALIDACIONES BÁSICAS FUERA DE LA TRANSACCIÓN
@@ -652,7 +650,15 @@ router.post('/pedido-rapido', async (req, res, next) => {
       });
     }
 
-    // Validar cada detalle
+    // ✅ NUEVO: Validar cliente para facturas
+    if (tipo_documento === 'factura' && (!cliente || !cliente.rut)) {
+      return res.status(400).json({
+        success: false,
+        message: 'RUT del cliente es obligatorio para facturas.'
+      });
+    }
+
+    // Validar cada detalle (sin cambios)
     let subtotalTotal = 0;
     for (let i = 0; i < detalles.length; i++) {
       const det = detalles[i];
@@ -722,25 +728,74 @@ router.post('/pedido-rapido', async (req, res, next) => {
 
       console.log('🎯 Números generados por procedimientos:', { numeroCompleto, numeroDiario });
 
+      // ✅ NUEVO: MANEJO DE CLIENTE
+      let id_cliente = null;
+      let datos_completos = true;
+      
+      if (cliente && cliente.rut) {
+        // Buscar cliente existente
+        let clienteDB = await Cliente.findOne({
+          where: { rut: cliente.rut },
+          transaction
+        });
+
+        if (clienteDB) {
+          console.log('✅ Cliente existente encontrado:', clienteDB.rut);
+          id_cliente = clienteDB.id_cliente;
+          
+          // Si el cliente existente no tiene datos completos, marcar como incompleto
+          if (!clienteDB.datos_completos) {
+            datos_completos = false;
+          }
+        } else {
+          console.log('🆕 Creando nuevo cliente con datos mínimos');
+          
+          // Crear cliente con datos mínimos
+          clienteDB = await Cliente.create({
+            rut: cliente.rut,
+            tipo_cliente: 'persona',
+            nombre: cliente.nombre || null,
+            telefono: null,
+            email: null,
+            direccion: null,
+            razon_social: null,
+            activo: true,
+            datos_completos: false  // Marcar como incompleto
+          }, { transaction });
+          
+          id_cliente = clienteDB.id_cliente;
+          datos_completos = false;  // Necesita completar datos
+          
+          console.log('✅ Cliente creado con ID:', id_cliente);
+        }
+      } else if (tipo_documento === 'factura') {
+        // Factura sin RUT - no debería llegar aquí por las validaciones
+        datos_completos = false;
+      } else {
+        // Ticket/Boleta sin cliente
+        datos_completos = tipo_documento !== 'factura';
+      }
+
       // ✅ 3) CREAR EL PEDIDO PRINCIPAL
       const nuevoPedido = await Pedido.create(
         {
           numero_pedido: numeroCompleto,
           numero_diario: numeroDiario,
           id_vendedor: req.user!.id,
+          id_cliente: id_cliente,  // ✅ NUEVO: Asociar cliente si existe
           tipo_documento,
           estado: 'vale_pendiente',
           subtotal: subtotalTotal,
           total: subtotalTotal,
-          datos_completos: tipo_documento !== 'factura',
-          observaciones: `Vale #${numeroDiario} creado por ${req.user!.username}`,
+          datos_completos: datos_completos,  // ✅ NUEVO: Marcar si necesita completar datos
+          observaciones: `Vale #${numeroDiario} creado por ${req.user!.username}${cliente?.nombre ? ` - Cliente: ${cliente.nombre}` : ''}`,
           fecha_creacion: new Date(),
           fecha_actualizacion: new Date()
         },
         { transaction }
       );
 
-      // ✅ 4) INSERTAR DETALLES
+      // ✅ 4) INSERTAR DETALLES (sin cambios)
       const detallesParaInsertar = detalles.map((det) => ({
         id_pedido: nuevoPedido.id_pedido,
         id_variante_producto: det.id_variante_producto,
@@ -769,7 +824,14 @@ router.post('/pedido-rapido', async (req, res, next) => {
           subtotal: nuevoPedido.subtotal,
           total: nuevoPedido.total,
           fecha_creacion: nuevoPedido.fecha_creacion,
-          detalles_count: detallesParaInsertar.length
+          detalles_count: detallesParaInsertar.length,
+          datos_completos: datos_completos,
+          // ✅ NUEVO: Incluir info del cliente en la respuesta
+          cliente: cliente ? {
+            nombre: cliente.nombre || 'Sin identificar',
+            rut: cliente.rut || null,
+            guardado: id_cliente !== null
+          } : null
         },
         message: `Vale #${nuevoPedido.numero_diario} creado exitosamente.`
       });
@@ -791,6 +853,161 @@ router.post('/pedido-rapido', async (req, res, next) => {
     });
   }
 });
+
+
+
+/**
+ * @openapi
+ * /vendedor/buscar-cliente/{rut}:
+ *   get:
+ *     summary: Buscar cliente por RUT para autocompletar datos
+ *     tags:
+ *       - vendedor
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/buscar-cliente/:rut', async (req, res, next) => {
+  try {
+    const { rut } = req.params;
+    
+    // Limpiar RUT (quitar puntos y guiones para buscar)
+    const rutLimpio = rut.replace(/\./g, '').replace(/-/g, '');
+    
+    console.log(`🔍 Buscando cliente con RUT: ${rut} (limpio: ${rutLimpio})`);
+    
+    // Buscar por RUT exacto o RUT limpio
+    const cliente = await Cliente.findOne({
+      where: {
+        [Op.or]: [
+          { rut: rut },
+          { rut: rutLimpio },
+          sequelize.where(
+            sequelize.fn('REPLACE', 
+              sequelize.fn('REPLACE', sequelize.col('rut'), '.', ''), 
+              '-', ''
+            ),
+            rutLimpio
+          )
+        ]
+      },
+      attributes: [
+        'id_cliente',
+        'rut',
+        'nombre',
+        'razon_social',
+        'telefono',
+        'email',
+        'tipo_cliente',
+        'datos_completos'
+      ]
+    });
+    
+    if (cliente) {
+      console.log(`✅ Cliente encontrado: ${cliente.nombre || cliente.razon_social}`);
+      
+      res.json({
+        success: true,
+        data: {
+          id_cliente: cliente.id_cliente,
+          rut: cliente.rut,
+          nombre: cliente.nombre || cliente.razon_social || 'Sin nombre',
+          telefono: cliente.telefono,
+          email: cliente.email,
+          tipo_cliente: cliente.tipo_cliente,
+          datos_completos: cliente.datos_completos,
+          mensaje: cliente.datos_completos 
+            ? 'Cliente con datos completos' 
+            : 'Cliente registrado pero faltan datos'
+        }
+      });
+    } else {
+      console.log(`❌ Cliente no encontrado con RUT: ${rut}`);
+      
+      res.json({
+        success: false,
+        message: 'Cliente no encontrado',
+        data: null
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error buscando cliente:', error);
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /vendedor/validar-rut:
+ *   post:
+ *     summary: Validar formato de RUT chileno
+ *     tags:
+ *       - vendedor
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/validar-rut', async (req, res) => {
+  try {
+    const { rut } = req.body;
+    
+    if (!rut) {
+      return res.json({
+        success: false,
+        message: 'RUT no proporcionado'
+      });
+    }
+    
+    // Función para validar RUT chileno
+    const validarRutChileno = (rutCompleto: string): boolean => {
+      if (!rutCompleto || rutCompleto.length < 3) return false;
+      
+      // Limpiar RUT
+      const rutLimpio = rutCompleto.replace(/\./g, '').replace(/-/g, '');
+      
+      // Verificar formato
+      if (!/^[0-9]{7,8}[0-9Kk]$/.test(rutLimpio)) return false;
+      
+      // Separar número y dígito verificador
+      const rutNumero = rutLimpio.slice(0, -1);
+      const dvIngresado = rutLimpio.slice(-1).toUpperCase();
+      
+      // Calcular dígito verificador
+      let suma = 0;
+      let multiplicador = 2;
+      
+      for (let i = rutNumero.length - 1; i >= 0; i--) {
+        suma += parseInt(rutNumero[i]) * multiplicador;
+        multiplicador = multiplicador === 7 ? 2 : multiplicador + 1;
+      }
+      
+      const resto = suma % 11;
+      const dvCalculado = resto === 0 ? '0' : resto === 1 ? 'K' : String(11 - resto);
+      
+      return dvIngresado === dvCalculado;
+    };
+    
+    const esValido = validarRutChileno(rut);
+    
+    res.json({
+      success: true,
+      data: {
+        rut: rut,
+        valido: esValido,
+        mensaje: esValido ? 'RUT válido' : 'RUT inválido'
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error validando RUT:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al validar RUT'
+    });
+  }
+});
+
+
+
 
 /**
  * @openapi

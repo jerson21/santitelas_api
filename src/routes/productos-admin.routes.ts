@@ -3,6 +3,8 @@ import { auth } from '../middlewares/auth';
 import { Producto } from '../models/Producto.model';
 import { VarianteProducto } from '../models/VarianteProducto.model';
 import { ModalidadProducto } from '../models/ModalidadProducto.model';
+import { StockPorBodega } from '../models/StockPorBodega.model';
+
 import { Categoria } from '../models/Categoria.model';
 import { sequelize } from '../config/database';
 import { Op } from 'sequelize';
@@ -802,5 +804,590 @@ router.patch('/:id/activar', async (req, res, next) => {
     next(error);
   }
 });
+
+
+/**
+ * @openapi
+ * /productos-admin/modalidad/{modalidadId}:
+ *   put:
+ *     summary: Actualizar modalidad existente
+ *     tags:
+ *       - productos-admin
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: modalidadId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nombre:
+ *                 type: string
+ *               descripcion:
+ *                 type: string
+ *               cantidad_base:
+ *                 type: number
+ *               es_cantidad_variable:
+ *                 type: boolean
+ *               minimo_cantidad:
+ *                 type: number
+ *               precio_costo:
+ *                 type: number
+ *               precio_neto:
+ *                 type: number
+ *               precio_factura:
+ *                 type: number
+ *               precios:
+ *                 type: object
+ *                 properties:
+ *                   costo:
+ *                     type: number
+ *                   neto:
+ *                     type: number
+ *                   factura:
+ *                     type: number
+ *     responses:
+ *       '200':
+ *         description: Modalidad actualizada exitosamente
+ *       '404':
+ *         description: Modalidad no encontrada
+ */
+router.put('/modalidad/:modalidadId', async (req, res, next) => {
+  try {
+    const { modalidadId } = req.params;
+    const updateData = req.body;
+
+    const modalidad = await ModalidadProducto.findByPk(modalidadId);
+    
+    if (!modalidad) {
+      return res.status(404).json({
+        success: false,
+        message: 'Modalidad no encontrada'
+      });
+    }
+
+    // Si se envían precios como objeto, procesarlos
+    if (updateData.precios) {
+      if (updateData.precios.costo !== undefined) {
+        updateData.precio_costo = updateData.precios.costo;
+      }
+      if (updateData.precios.neto !== undefined) {
+        updateData.precio_neto = updateData.precios.neto;
+      }
+      if (updateData.precios.factura !== undefined) {
+        updateData.precio_neto_factura = updateData.precios.factura;
+      }
+      delete updateData.precios;
+    }
+
+    // Campos permitidos para actualización
+    const camposPermitidos = [
+      'nombre', 'descripcion', 'cantidad_base', 
+      'es_cantidad_variable', 'minimo_cantidad', 
+      'precio_costo', 'precio_neto', 'precio_neto_factura'
+    ];
+
+    const datosActualizacion: any = {};
+    camposPermitidos.forEach(campo => {
+      if (updateData[campo] !== undefined) {
+        datosActualizacion[campo] = updateData[campo];
+      }
+    });
+
+    if (Object.keys(datosActualizacion).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No hay campos válidos para actualizar'
+      });
+    }
+
+    datosActualizacion.fecha_actualizacion = new Date();
+    await modalidad.update(datosActualizacion);
+
+    res.json({
+      success: true,
+      data: modalidad,
+      message: 'Modalidad actualizada exitosamente'
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /productos-admin/variante/{varianteId}:
+ *   put:
+ *     summary: Actualizar variante existente
+ *     tags:
+ *       - productos-admin
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: varianteId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               color:
+ *                 type: string
+ *               medida:
+ *                 type: string
+ *               material:
+ *                 type: string
+ *               descripcion:
+ *                 type: string
+ *               stock_minimo:
+ *                 type: number
+ *               activo:
+ *                 type: boolean
+ *     responses:
+ *       '200':
+ *         description: Variante actualizada exitosamente
+ *       '404':
+ *         description: Variante no encontrada
+ */
+router.put('/variante/:varianteId', async (req, res, next) => {
+  try {
+    const { varianteId } = req.params;
+    const updateData = req.body;
+
+    const variante = await VarianteProducto.findByPk(varianteId);
+    
+    if (!variante) {
+      return res.status(404).json({
+        success: false,
+        message: 'Variante no encontrada'
+      });
+    }
+
+    const camposPermitidos = [
+      'color', 'medida', 'material', 
+      'descripcion', 'stock_minimo', 'activo'
+    ];
+
+    const datosActualizacion: any = {};
+    camposPermitidos.forEach(campo => {
+      if (updateData[campo] !== undefined) {
+        datosActualizacion[campo] = updateData[campo];
+      }
+    });
+
+    if (Object.keys(datosActualizacion).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No hay campos válidos para actualizar'
+      });
+    }
+
+    datosActualizacion.fecha_actualizacion = new Date();
+    await variante.update(datosActualizacion);
+
+    res.json({
+      success: true,
+      data: variante,
+      message: 'Variante actualizada exitosamente'
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /productos-admin/{id}:
+ *   delete:
+ *     summary: Eliminar producto (soft delete)
+ *     tags:
+ *       - productos-admin
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       '200':
+ *         description: Producto eliminado exitosamente
+ *       '404':
+ *         description: Producto no encontrado
+ */
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const producto = await Producto.findByPk(id);
+    if (!producto) {
+      return res.status(404).json({
+        success: false,
+        message: 'Producto no encontrado'
+      });
+    }
+
+    // Soft delete - solo desactivar
+    await producto.update({
+      activo: false,
+      fecha_actualizacion: new Date()
+    });
+
+    // También desactivar todas las variantes
+    await VarianteProducto.update(
+      { activo: false },
+      { where: { id_producto: id } }
+    );
+
+    res.json({
+      success: true,
+      message: 'Producto eliminado exitosamente'
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Agregar estos endpoints en productos-admin.routes.ts
+
+/**
+ * @openapi
+ * /productos-admin/variante/{varianteId}:
+ *   delete:
+ *     summary: Eliminar variante (soft delete)
+ *     tags:
+ *       - productos-admin
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: varianteId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       '200':
+ *         description: Variante eliminada exitosamente
+ *       '404':
+ *         description: Variante no encontrada
+ *       '400':
+ *         description: No se puede eliminar la variante
+ */
+router.delete('/variante/:varianteId', async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { varianteId } = req.params;
+    
+    const variante = await VarianteProducto.findByPk(varianteId, {
+      include: [{
+        model: Producto,
+        as: 'producto'
+      }]
+    });
+    
+    if (!variante) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Variante no encontrada'
+      });
+    }
+
+    // Verificar que no sea la última variante activa del producto
+    const variantesActivas = await VarianteProducto.count({
+      where: {
+        id_producto: variante.id_producto,
+        activo: true
+      }
+    });
+
+    if (variantesActivas <= 1) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'No se puede eliminar la última variante del producto. El producto debe tener al menos una variante activa.'
+      });
+    }
+
+    // Verificar si tiene stock
+    const stockTotal = await StockPorBodega.sum('cantidad_disponible', {
+      where: { id_variante_producto: varianteId }
+    });
+
+    if (stockTotal > 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `No se puede eliminar la variante porque tiene ${stockTotal} unidades en stock`
+      });
+    }
+
+    // Soft delete - desactivar variante y sus modalidades
+    await variante.update({ activo: false }, { transaction });
+    
+    // Desactivar todas las modalidades de esta variante
+    await ModalidadProducto.update(
+      { activa: false },
+      { 
+        where: { id_variante_producto: varianteId },
+        transaction 
+      }
+    );
+
+    await transaction.commit();
+
+    res.json({
+      success: true,
+      message: 'Variante eliminada exitosamente'
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /productos-admin/modalidad/{modalidadId}:
+ *   delete:
+ *     summary: Eliminar modalidad (soft delete)
+ *     tags:
+ *       - productos-admin
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: modalidadId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       '200':
+ *         description: Modalidad eliminada exitosamente
+ *       '404':
+ *         description: Modalidad no encontrada
+ *       '400':
+ *         description: No se puede eliminar la modalidad
+ */
+router.delete('/modalidad/:modalidadId', async (req, res, next) => {
+  try {
+    const { modalidadId } = req.params;
+    
+    const modalidad = await ModalidadProducto.findByPk(modalidadId, {
+      include: [{
+        model: VarianteProducto,
+        as: 'variante'
+      }]
+    });
+    
+    if (!modalidad) {
+      return res.status(404).json({
+        success: false,
+        message: 'Modalidad no encontrada'
+      });
+    }
+
+    // Verificar que no sea la última modalidad activa de la variante
+    const modalidadesActivas = await ModalidadProducto.count({
+      where: {
+        id_variante_producto: modalidad.id_variante_producto,
+        activa: true
+      }
+    });
+
+    if (modalidadesActivas <= 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'No se puede eliminar la última modalidad de la variante. Cada variante debe tener al menos una modalidad activa.'
+      });
+    }
+
+    // Soft delete - desactivar modalidad
+    await modalidad.update({ activa: false });
+
+    res.json({
+      success: true,
+      message: 'Modalidad eliminada exitosamente'
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /productos-admin/{id}/duplicar:
+ *   post:
+ *     summary: Duplicar producto completo con todas sus variantes y modalidades
+ *     tags:
+ *       - productos-admin
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nuevo_nombre:
+ *                 type: string
+ *                 description: Nombre para el producto duplicado
+ *               nuevo_codigo:
+ *                 type: string
+ *                 description: Código para el producto duplicado (opcional, se genera automáticamente si no se proporciona)
+ *     responses:
+ *       '201':
+ *         description: Producto duplicado exitosamente
+ *       '404':
+ *         description: Producto no encontrado
+ */
+router.post('/:id/duplicar', async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const { nuevo_nombre, nuevo_codigo } = req.body;
+
+    // Obtener producto original con todas sus relaciones
+    const productoOriginal = await Producto.findByPk(id, {
+      include: [
+        {
+          model: VarianteProducto,
+          as: 'variantes',
+          where: { activo: true },
+          required: false,
+          include: [{
+            model: ModalidadProducto,
+            as: 'modalidades',
+            where: { activa: true },
+            required: false
+          }]
+        }
+      ]
+    });
+
+    if (!productoOriginal) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Producto no encontrado'
+      });
+    }
+
+    // Generar nuevo código si no se proporciona
+    let codigoFinal = nuevo_codigo;
+    if (!codigoFinal) {
+      const timestamp = Date.now().toString().slice(-4);
+      codigoFinal = `${productoOriginal.codigo}-COPIA-${timestamp}`;
+    }
+
+    // Verificar que el código no exista
+    const codigoExiste = await Producto.findOne({
+      where: { codigo: codigoFinal }
+    });
+
+    if (codigoExiste) {
+      await transaction.rollback();
+      return res.status(409).json({
+        success: false,
+        message: `Ya existe un producto con el código ${codigoFinal}`
+      });
+    }
+
+    // Crear copia del producto
+    const datosProducto = productoOriginal.toJSON();
+    delete datosProducto.id_producto;
+    delete datosProducto.fecha_creacion;
+    delete datosProducto.fecha_actualizacion;
+    
+    const productoNuevo = await Producto.create({
+      ...datosProducto,
+      nombre: nuevo_nombre || `${datosProducto.nombre} (COPIA)`,
+      codigo: codigoFinal,
+      activo: true
+    }, { transaction });
+
+    // Copiar variantes y modalidades
+    let totalVariantes = 0;
+    let totalModalidades = 0;
+
+    for (const variante of datosProducto.variantes || []) {
+      const datosVariante = { ...variante };
+      delete datosVariante.id_variante_producto;
+      delete datosVariante.fecha_creacion;
+      delete datosVariante.fecha_actualizacion;
+      
+      // Generar nuevo SKU
+      const nuevoSKU = `${datosVariante.sku}-${Date.now().toString().slice(-4)}`;
+      
+      const varianteNueva = await VarianteProducto.create({
+        ...datosVariante,
+        id_producto: productoNuevo.id_producto,
+        sku: nuevoSKU,
+        activo: true
+      }, { transaction });
+      
+      totalVariantes++;
+
+      // Copiar modalidades
+      for (const modalidad of variante.modalidades || []) {
+        const datosModalidad = { ...modalidad };
+        delete datosModalidad.id_modalidad;
+        delete datosModalidad.fecha_creacion;
+        delete datosModalidad.fecha_actualizacion;
+        
+        await ModalidadProducto.create({
+          ...datosModalidad,
+          id_variante_producto: varianteNueva.id_variante_producto,
+          activa: true
+        }, { transaction });
+        
+        totalModalidades++;
+      }
+    }
+
+    await transaction.commit();
+
+    res.status(201).json({
+      success: true,
+      data: {
+        id_producto: productoNuevo.id_producto,
+        codigo: productoNuevo.codigo,
+        nombre: productoNuevo.nombre,
+        variantes_copiadas: totalVariantes,
+        modalidades_copiadas: totalModalidades
+      },
+      message: `Producto duplicado exitosamente con ${totalVariantes} variantes y ${totalModalidades} modalidades`
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+});
+
 
 export default router;
