@@ -1,4 +1,4 @@
-﻿// src/models/index.ts - CORREGIDO PARA HOOKS
+﻿// src/models/index.ts - CORREGIDO PARA INCLUIR ConfiguracionSistema
 import { sequelize } from '../config/database';
 
 // Importar modelos completos
@@ -21,12 +21,16 @@ import { ArqueoCaja } from './ArqueoCaja.model';
 import { Venta } from './Venta.model';
 import { Pago } from './Pago.model';
 import { MovimientoStock } from './MovimientoStock.model';
+// ✅ AÑADIR ConfiguracionSistema
+import { ConfiguracionSistema, ConfiguracionService } from './ConfiguracionSistema.model';
 
 // Exportar modelos
 export {
   Rol, Usuario, Categoria, Producto, VarianteProducto, ModalidadProducto,
   Cliente, TipoDocumento, Bodega, StockPorBodega, Pedido, DetallePedido,
-  MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock
+  MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock,
+  // ✅ EXPORTAR ConfiguracionSistema y Service
+  ConfiguracionSistema, ConfiguracionService
 };
 
 export async function initializeModels() {
@@ -37,7 +41,9 @@ export async function initializeModels() {
     sequelize.addModels([
       Rol, Usuario, Categoria, Producto, VarianteProducto, ModalidadProducto,
       Cliente, TipoDocumento, Bodega, StockPorBodega, Pedido, DetallePedido,
-      MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock
+      MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock,
+      // ✅ AÑADIR ConfiguracionSistema
+      ConfiguracionSistema
     ]);
 
     // ✅ VERIFICAR que los modelos se registraron correctamente
@@ -57,6 +63,13 @@ export async function initializeModels() {
       }
     } else {
       throw new Error('❌ Modelo Usuario no se registró correctamente');
+    }
+
+    // ✅ VERIFICAR ConfiguracionSistema
+    if (sequelize.models.ConfiguracionSistema) {
+      console.log('✅ Modelo ConfiguracionSistema registrado correctamente');
+    } else {
+      console.log('⚠️  Modelo ConfiguracionSistema no se registró - verificar definición');
     }
     
     return true;

@@ -264,79 +264,87 @@ router.get('/catalogo', async (req, res, next) => {
     });
 
     // Procesar datos y ordenar por categoría en memoria si es necesario
-    const catalogoEstructurado = productos.map(producto => {
-      const productData = producto.toJSON();
+   
+const catalogoEstructurado = productos.map(producto => {
+  const productData = producto.toJSON();
 
-      const todasModalidades: any[] = [];
-      const variantes = productData.variantes.map((variante: any) => {
-        const stockTotal = variante.stockPorBodega?.reduce(
-          (sum: number, stock: any) => sum + stock.cantidad_disponible, 0
-        ) || 0;
+  const todasModalidades: any[] = [];
+  const variantes = productData.variantes.map((variante: any) => {
+    // Calcular stock total sumando todas las bodegas
+    const stockTotal = variante.stockPorBodega?.reduce(
+      (sum: number, stock: any) => sum + (parseFloat(stock.cantidad_disponible) || 0), 0
+    ) || 0;
 
-        if (con_stock === 'true' && stockTotal === 0) {
-          return null;
+    if (con_stock === 'true' && stockTotal === 0) {
+      return null;
+    }
+
+    const modalidadesVariante = variante.modalidades || [];
+    todasModalidades.push(...modalidadesVariante);
+
+    return {
+      id_variante: variante.id_variante_producto,
+      sku: variante.sku,
+      color: variante.color,
+      medida: variante.medida,
+      material: variante.material,
+      descripcion_opcion: [variante.color, variante.medida, variante.material]
+        .filter(Boolean).join(' - ') || 'Estándar',
+      // IMPORTANTE: Asegurar que stock_total sea un número, no string
+      stock_total: stockTotal,
+      stock_disponible: stockTotal,
+      tiene_stock: stockTotal > 0,
+      modalidades: modalidadesVariante.map((modalidad: any) => ({
+        id_modalidad: modalidad.id_modalidad,
+        nombre: modalidad.nombre,
+        descripcion: modalidad.descripcion,
+        // Asegurar que cantidad_base sea número
+        cantidad_base: parseFloat(modalidad.cantidad_base) || 1,
+        es_cantidad_variable: Boolean(modalidad.es_cantidad_variable),
+        minimo_cantidad: parseFloat(modalidad.minimo_cantidad) || 1,
+        precios: {
+          costo: parseFloat(modalidad.precio_costo) || 0,
+          neto: parseFloat(modalidad.precio_neto) || 0,
+          factura: parseFloat(modalidad.precio_neto_factura) || 0,
+          con_iva: Math.round((parseFloat(modalidad.precio_neto_factura) || 0) * 1.19)
         }
+      }))
+    };
+  }).filter(Boolean);
 
-        const modalidadesVariante = variante.modalidades || [];
-        todasModalidades.push(...modalidadesVariante);
+  const todosPrecios = todasModalidades
+    .map((m: any) => parseFloat(m.precio_neto))
+    .filter(p => !isNaN(p) && p > 0);
 
-        return {
-          id_variante: variante.id_variante_producto,
-          sku: variante.sku,
-          color: variante.color,
-          medida: variante.medida,
-          material: variante.material,
-          descripcion_opcion: [variante.color, variante.medida, variante.material]
-            .filter(Boolean).join(' - ') || 'Estándar',
-          stock_total: stockTotal,
-          tiene_stock: stockTotal > 0,
-          modalidades: modalidadesVariante.map((modalidad: any) => ({
-            id_modalidad: modalidad.id_modalidad,
-            nombre: modalidad.nombre,
-            descripcion: modalidad.descripcion,
-            cantidad_base: modalidad.cantidad_base,
-            es_cantidad_variable: modalidad.es_cantidad_variable,
-            minimo_cantidad: modalidad.minimo_cantidad,
-            precios: {
-              costo: modalidad.precio_costo,
-              neto: modalidad.precio_neto,
-              factura: modalidad.precio_neto_factura,
-              con_iva: Math.round(Number(modalidad.precio_neto_factura) * 1.19)
-            }
-          }))
-        };
-      }).filter(Boolean);
+  const precioMinimo = todosPrecios.length > 0 ? Math.min(...todosPrecios) : 0;
+  const precioMaximo = todosPrecios.length > 0 ? Math.max(...todosPrecios) : 0;
 
-      const todosPrecios = todasModalidades
-        .map((m: any) => m.precio_neto)
-        .filter(Boolean);
+  // Calcular stock total del producto
+  const stockTotalProducto = variantes.reduce((sum: number, v: any) => sum + (v?.stock_total || 0), 0);
 
-      const precioMinimo = todosPrecios.length > 0 ? Math.min(...todosPrecios) : 0;
-      const precioMaximo = todosPrecios.length > 0 ? Math.max(...todosPrecios) : 0;
-
-      return {
-        id_producto: productData.id_producto,
-        categoria: productData.categoria?.nombre || 'SIN CATEGORÍA',
-        tipo: productData.tipo || 'SIN TIPO',
-        modelo: productData.nombre,
-        codigo: productData.codigo,
-        descripcion: productData.descripcion,
-        unidad_medida: productData.unidad_medida,
-        opciones: variantes,
-        resumen_precios: {
-          precio_minimo: precioMinimo,
-          precio_maximo: precioMaximo,
-          rango_precios: precioMinimo === precioMaximo 
-            ? `$${precioMinimo.toLocaleString('es-CL')}`
-            : `$${precioMinimo.toLocaleString('es-CL')} - $${precioMaximo.toLocaleString('es-CL')}`
-        },
-        estadisticas: {
-          total_opciones: variantes.length,
-          total_modalidades: todasModalidades.length,
-          tiene_stock: variantes.some((v: any) => v.tiene_stock)
-        }
-      };
-    });
+  return {
+    id_producto: productData.id_producto,
+    categoria: productData.categoria?.nombre || 'SIN CATEGORÍA',
+    tipo: productData.tipo || 'SIN TIPO',
+    modelo: productData.nombre,
+    codigo: productData.codigo,
+    descripcion: productData.descripcion,
+    unidad_medida: productData.unidad_medida,
+    opciones: variantes,
+    resumen_precios: {
+      precio_minimo: precioMinimo,
+      precio_maximo: precioMaximo,
+      rango_precios: precioMinimo === precioMaximo 
+        ? `$${precioMinimo.toLocaleString('es-CL')}`
+        : `$${precioMinimo.toLocaleString('es-CL')} - $${precioMaximo.toLocaleString('es-CL')}`
+    },
+    estadisticas: {
+      total_opciones: variantes.length,
+      total_modalidades: todasModalidades.length,
+      tiene_stock: stockTotalProducto > 0
+    }
+  };
+});
 
     // Ordenar por categoría en memoria
     catalogoEstructurado.sort((a, b) => {
@@ -602,7 +610,7 @@ router.get('/:id', async (req, res, next) => {
             costo: modalidad.precio_costo,
             neto: modalidad.precio_neto,
             factura: modalidad.precio_neto_factura,
-            con_iva: Math.round(Number(modalidad.precio_neto_factura) * 1.19)
+            con_iva: Number(modalidad.precio_con_iva) 
           }
         }))
       };

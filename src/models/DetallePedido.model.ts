@@ -13,6 +13,8 @@ import { Pedido } from './Pedido.model';
 import { VarianteProducto } from './VarianteProducto.model';
 import { ModalidadProducto } from './ModalidadProducto.model';
 import { Usuario } from './Usuario.model';
+import { Bodega } from './Bodega.model'; // ✅ AÑADIR ESTA IMPORTACIÓN
+
 
 @Table({
   tableName: 'detalle_pedidos',
@@ -50,6 +52,18 @@ export class DetallePedido extends Model {
     allowNull: false
   })
   id_modalidad!: number;
+
+  @ForeignKey(() => Bodega)
+  @Column({
+    type: DataType.INTEGER,
+    allowNull: true,
+    field: 'id_bodega'
+  })
+  id_bodega?: number;
+
+  @BelongsTo(() => Bodega, 'id_bodega')
+  bodega?: Bodega;
+
 
   @Column({
     type: DataType.DECIMAL(10, 2),
@@ -97,6 +111,8 @@ export class DetallePedido extends Model {
   })
   fecha_creacion!: Date;
 
+
+  
   // RELACIONES
   pedido!: Pedido;
   varianteProducto!: VarianteProducto;

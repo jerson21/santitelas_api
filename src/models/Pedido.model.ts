@@ -50,6 +50,14 @@ export class Pedido extends Model {
   })
   numero_diario!: number;
 
+
+@Column({
+  type: DataType.DATE,
+  allowNull: true,
+  field: 'fecha_limite_reserva'
+})
+fecha_limite_reserva?: Date;
+
   @ForeignKey(() => Usuario)
   @Column({
     type: DataType.INTEGER,

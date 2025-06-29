@@ -14,6 +14,9 @@ import productosRoutes from './productos.routes';
 import categoriasRoutes from './categorias.routes';
 import bodegasRoutes from './bodegas.routes';
 import stockRoutes from './stock.routes';
+import stockBodegaRoutes from './stock-bodega.routes';
+import stockUnifiedRoutes from './stock-unified.routes';
+
 import productosAdminRoutes from './productos-admin.routes';
 
 
@@ -70,6 +73,7 @@ router.use('/vendedor', authenticateToken, vendedorRoutes);
 router.use('/cajero', authenticateToken, cajeroRoutes);
 router.use('/admin', authenticateToken, adminRoutes);
 
+
 // Rutas de productos y categorías (separadas)
 // Rutas de consulta (para vendedores/clientes)
 router.use('/productos', authenticateToken, productosRoutes);  
@@ -78,6 +82,9 @@ router.use('/categorias', authenticateToken, categoriasRoutes);
 // Rutas de inventario y stock
 router.use('/bodegas', authenticateToken, bodegasRoutes);
 router.use('/stock', authenticateToken, stockRoutes);
+router.use('/stock-bodega', stockBodegaRoutes);
+
+router.use('/stock-unified', authenticateToken, stockUnifiedRoutes);
 
 
 // Rutas de administración (para administradores)

@@ -856,6 +856,244 @@ router.post('/vale/:numeroVale/confirmar-antiguo', async (req: Request, res: Res
   }
 });
 
+
+/**
+ * @openapi
+ * /cajero/vale/{numeroVale}/actualizar-precios:
+ *   put:
+ *     summary: Actualizar precios de productos en un vale pendiente
+ *     parameters:
+ *       - in: path
+ *         name: numeroVale
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Número del vale (puede ser diario o completo)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - actualizaciones
+ *             properties:
+ *               actualizaciones:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - index
+ *                     - precio
+ *                   properties:
+ *                     index:
+ *                       type: integer
+ *                       description: Índice del producto en el array de detalles
+ *                     precio:
+ *                       type: number
+ *                       description: Nuevo precio unitario
+ *     responses:
+ *       200:
+ *         description: Precios actualizados exitosamente
+ *       400:
+ *         description: Error de validación
+ *       404:
+ *         description: Vale no encontrado
+ */
+router.put('/vale/:numeroVale/actualizar-precios', [
+  param('numeroVale').isString().notEmpty().withMessage('Número de vale requerido'),
+  body('actualizaciones').isArray().withMessage('Se requiere un array de actualizaciones'),
+  body('actualizaciones.*.index').isInt({ min: 0 }).withMessage('Índice debe ser un número entero no negativo'),
+  body('actualizaciones.*.precio').isNumeric().custom((value) => value > 0).withMessage('Precio debe ser mayor a 0'),
+  handleValidationErrors
+], async (req: Request, res: Response, next: NextFunction) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { numeroVale } = req.params;
+    const { actualizaciones } = req.body;
+    
+    // ✅ Obtener ID del cajero
+    const id_cajero = (req as any).user?.id;
+    
+    if (!id_cajero) {
+      await transaction.rollback();
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Usuario no autenticado' 
+      });
+    }
+    
+    console.log(`📝 Actualizando precios del vale: ${numeroVale}`);
+    console.log(`📋 Actualizaciones solicitadas:`, actualizaciones);
+    
+    // 1. Verificar turno abierto
+    const turnoActivo = await TurnoCaja.findOne({ 
+      where: { id_cajero, estado: 'abierto' }, 
+      transaction 
+    });
+    
+    if (!turnoActivo) {
+      await transaction.rollback();
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No tienes un turno de caja abierto' 
+      });
+    }
+    
+    // 2. Buscar el vale usando la función helper
+    const resultadoBusqueda = await buscarValePorNumero(numeroVale, transaction);
+    
+    if (!resultadoBusqueda.encontrado) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: resultadoBusqueda.mensaje || `Vale ${numeroVale} no encontrado`
+      });
+    }
+    
+    // 3. Obtener el vale completo con detalles
+    const vale = await Pedido.findOne({
+      where: { 
+        numero_pedido: resultadoBusqueda.numero_pedido,
+        estado: 'vale_pendiente' // Solo vales pendientes
+      },
+      include: [
+        {
+          model: DetallePedido,
+          as: 'detalles',
+          include: [
+            {
+              model: VarianteProducto,
+              as: 'varianteProducto',
+              include: [{
+                model: Producto,
+                as: 'producto'
+              }]
+            }
+          ]
+        }
+      ],
+      lock: transaction.LOCK.UPDATE,
+      transaction
+    });
+    
+    if (!vale) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: `Vale ${numeroVale} no encontrado o ya fue procesado`
+      });
+    }
+    
+    // 4. Validar índices
+    const detalles = vale.detalles || [];
+    for (const update of actualizaciones) {
+      if (update.index >= detalles.length) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Índice ${update.index} fuera de rango. El vale tiene ${detalles.length} productos`
+        });
+      }
+    }
+    
+    // 5. Aplicar actualizaciones
+    let cambiosRealizados = 0;
+    const cambiosLog: any[] = [];
+    const subtotalAnterior = vale.subtotal;
+    
+    for (const update of actualizaciones) {
+      const detalle = detalles[update.index];
+      const precioAnterior = detalle.precio_unitario;
+      
+      // Actualizar precio en el detalle
+      await detalle.update({
+        precio_unitario: update.precio,
+        subtotal: detalle.cantidad * update.precio
+      }, { transaction });
+      
+      cambiosRealizados++;
+      cambiosLog.push({
+        index: update.index,
+        producto: detalle.varianteProducto?.producto?.nombre || 'Producto',
+        descripcion: [
+          detalle.varianteProducto?.color,
+          detalle.varianteProducto?.medida
+        ].filter(Boolean).join(' - '),
+        cantidad: detalle.cantidad,
+        precio_anterior: precioAnterior,
+        precio_nuevo: update.precio,
+        diferencia_unitaria: update.precio - precioAnterior,
+        diferencia_total: (update.precio - precioAnterior) * detalle.cantidad
+      });
+    }
+    
+    // 6. Recalcular totales del pedido
+ // 6. Recalcular totales del pedido
+let nuevoSubtotal = 0;
+
+// Recorrer todos los detalles y usar el precio actualizado si corresponde
+for (let i = 0; i < detalles.length; i++) {
+  const actualizacion = actualizaciones.find((u: { index: number; precio: number }) => u.index === i);
+  if (actualizacion) {
+    // Usar el precio actualizado
+    nuevoSubtotal += detalles[i].cantidad * actualizacion.precio;
+  } else {
+    // Usar el precio original
+    nuevoSubtotal += Number(detalles[i].subtotal);
+  }
+}
+
+const nuevoTotal = nuevoSubtotal - (vale.descuento || 0);
+    
+    // 7. Actualizar pedido
+    await vale.update({
+      subtotal: nuevoSubtotal,
+      total: nuevoTotal,
+      fecha_actualizacion: new Date(),
+      observaciones: [
+        vale.observaciones,
+        `[PRECIOS ACTUALIZADOS POR CAJERO ID:${id_cajero} - ${new Date().toLocaleString('es-CL')}]`,
+        `[${cambiosRealizados} precios modificados - Diferencia total: $${(nuevoTotal - vale.total).toLocaleString('es-CL')}]`
+      ].filter(Boolean).join('\n')
+    }, { transaction });
+    
+    // 8. Commit de la transacción
+    await transaction.commit();
+    
+    console.log(`✅ Precios actualizados exitosamente:`, {
+      vale: numeroVale,
+      cambios: cambiosRealizados,
+      total_anterior: vale.total,
+      total_nuevo: nuevoTotal
+    });
+    
+    // 9. Respuesta exitosa
+    res.json({
+      success: true,
+      message: `Se actualizaron ${cambiosRealizados} precios correctamente`,
+      data: {
+        numero_vale: vale.numero_pedido,
+        cambios_realizados: cambiosRealizados,
+        total_anterior: vale.total,
+        total_nuevo: nuevoTotal,
+        diferencia_total: nuevoTotal - vale.total,
+        detalle_cambios: cambiosLog,
+        resumen: {
+          productos_actualizados: cambiosRealizados,
+          aumento_total: cambiosLog.reduce((sum, c) => sum + c.diferencia_total, 0)
+        }
+      }
+    });
+    
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Error actualizando precios:', error);
+    next(error);
+  }
+});
+
+
 // ✅ ======================================================================
 // ✅ ENDPOINT DEBUG: Ver todos los vales del día - CON TIPADO CORRECTO
 // ✅ ======================================================================

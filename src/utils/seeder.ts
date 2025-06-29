@@ -1,4 +1,5 @@
 // src/utils/seeder.ts - VERSIÓN COMPLETA CON DATOS BÁSICOS
+import { sequelize } from '../config/database';
 
 import {
   Rol,
@@ -12,7 +13,8 @@ import {
   VarianteProducto,
   ModalidadProducto,
   Cliente,
-  StockPorBodega
+  StockPorBodega,
+  ConfiguracionSistema
 } from '../models';
 
 export async function seedDatabase() {
@@ -75,6 +77,9 @@ async function createBasicData() {
   
   // 6. CAJAS
   await createCashes();
+
+  await createSystemConfigurations();
+
   
   console.log('✅ Datos básicos creados');
   console.log('');
@@ -94,15 +99,16 @@ async function createRoles() {
       nombre: 'Cajero',  // Cambiado de nombre_rol a nombre
       descripcion: 'Gestión de caja y ventas'
     },
-     {
+   
+    {
       id_rol: 3,
-      nombre: 'Bodeguero',  // Cambiado de nombre_rol a nombre
-      descripcion: 'Gestión de inventario'
+      nombre: 'Vendedor',  // Cambiado de nombre_rol a nombre
+      descripcion: 'Gestión de ventas'
     },
     {
       id_rol: 4,
-      nombre: 'Vendedor',  // Cambiado de nombre_rol a nombre
-      descripcion: 'Gestión de ventas'
+      nombre: 'Bodeguero',  // Cambiado de nombre_rol a nombre
+      descripcion: 'Gestión de inventario'
     }
   ];
 
@@ -669,12 +675,269 @@ async function createInitialStock() {
   console.log('✅ Stock inicial creado');
 }
 
+
+async function createSystemConfigurations() {
+  console.log('   ⚙️ Creando configuraciones por defecto...');
+
+  const configs = [
+    { clave: 'stock.permite_venta_sin_stock', valor: 'false', tipo: 'boolean', descripcion: 'Permitir ventas cuando no hay stock disponible', categoria: 'stock' },
+    { clave: 'stock.auto_asignar_bodega', valor: 'true', tipo: 'boolean', descripcion: 'Asignar automáticamente la bodega para ventas', categoria: 'stock' },
+    { clave: 'stock.prioridad_bodega', valor: 'mayor_stock', tipo: 'string', descripcion: 'Criterio para asignar bodega: mayor_stock, mas_cercana, fifo', categoria: 'stock' },
+    { clave: 'stock.reserva_temporal_minutos', valor: '30', tipo: 'number', descripcion: 'Tiempo en minutos para reservas temporales en vales', categoria: 'stock' },
+    { clave: 'venta.validar_stock_en_vale', valor: 'true', tipo: 'boolean', descripcion: 'Validar disponibilidad de stock al crear vales', categoria: 'venta' },
+    { clave: 'venta.crear_reserva_temporal', valor: 'true', tipo: 'boolean', descripcion: 'Crear reserva temporal al generar vale', categoria: 'venta' },
+    { clave: 'venta.timeout_vale_minutos', valor: '60', tipo: 'number', descripcion: 'Tiempo máximo para procesar un vale antes de liberar reserva', categoria: 'venta' },
+    { clave: 'ui.modo_stock_default', valor: 'unificado', tipo: 'string', descripcion: 'Vista por defecto: unificado, por_bodega, ambos', categoria: 'ui' }
+  ];
+
+  for (const cfg of configs) {
+    await ConfiguracionSistema.findOrCreate({
+      where: { clave: cfg.clave },
+      defaults: cfg
+    });
+  }
+
+  console.log('      ✓ Configuraciones creadas');
+}
+
+// REEMPLAZAR ESTAS FUNCIONES EN TU SEEDER
+// REEMPLAZAR ESTAS FUNCIONES EN TU SEEDER
+// NO NECESITAS IMPORTAR sequelize con esta versión
+
 async function createModalitiesForExistingVariants() {
-  // Las modalidades se crean por trigger o procedure
-  console.log('✅ Modalidades manejadas por triggers/procedures');
+  console.log('🏷️  Creando modalidades para variantes...');
+  
+  try {
+    // Obtener todas las variantes
+    const variantes = await VarianteProducto.findAll();
+
+    if (variantes.length === 0) {
+      console.log('⚠️  No se encontraron variantes, omitiendo modalidades');
+      return;
+    }
+
+    console.log(`   📋 Procesando ${variantes.length} variantes...`);
+
+    let modalidadesCreadas = 0;
+
+    for (const variante of variantes) {
+      // Obtener el producto de la variante
+      const producto = await Producto.findByPk(variante.id_producto);
+      
+      if (!producto) {
+        console.log(`   ⚠️  Producto no encontrado para variante ${variante.sku}`);
+        continue;
+      }
+      
+      console.log(`   🔄 Creando modalidades para: ${variante.sku} (${producto.unidad_medida})`);
+      
+      if (producto.unidad_medida === 'metro') {
+        // MODALIDADES PARA TELAS (metro)
+        
+        // 1. METRO - Venta al corte
+        const [modalidadMetro, creadoMetro] = await ModalidadProducto.findOrCreate({
+          where: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'METRO'
+          },
+          defaults: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'METRO',
+            descripcion: 'Venta al corte por metro',
+            cantidad_base: 1,
+            es_cantidad_variable: true,
+            minimo_cantidad: 0.1,
+            precio_costo: producto.precio_costo_base || 0,
+            precio_neto: producto.precio_neto_base || 0,
+            precio_neto_factura: producto.precio_neto_factura_base || 0,
+            activo: true
+          }
+        });
+
+        // 2. ROLLO - 25 metros con descuento
+        const precioRolloCosto = Math.round((producto.precio_costo_base || 0) * 25 * 0.9);
+        const precioRolloNeto = Math.round((producto.precio_neto_base || 0) * 25 * 0.9);
+        const precioRolloFactura = Math.round((producto.precio_neto_factura_base || 0) * 25 * 0.9);
+
+        const [modalidadRollo, creadoRollo] = await ModalidadProducto.findOrCreate({
+          where: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'ROLLO'
+          },
+          defaults: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'ROLLO',
+            descripcion: 'Rollo completo de 25 metros',
+            cantidad_base: 25,
+            es_cantidad_variable: false,
+            minimo_cantidad: 25,
+            precio_costo: precioRolloCosto,
+            precio_neto: precioRolloNeto,
+            precio_neto_factura: precioRolloFactura,
+            activo: true
+          }
+        });
+
+        if (creadoMetro) modalidadesCreadas++;
+        if (creadoRollo) modalidadesCreadas++;
+        
+        console.log(`      ✓ Metro ($${producto.precio_neto_base}) y Rollo ($${precioRolloNeto})`);
+
+      } else if (producto.unidad_medida === 'unidad') {
+        // MODALIDADES PARA PRODUCTOS UNITARIOS (corchetes, accesorios, etc.)
+        
+        // Para corchetes que no tienen precio, asignar precios base
+        const precioBase = producto.precio_neto_base || 100;
+        const precioCosto = producto.precio_costo_base || 50;
+        const precioFactura = producto.precio_neto_factura_base || 84;
+        
+        // 1. UNIDAD - Venta individual
+        const [modalidadUnidad, creadoUnidad] = await ModalidadProducto.findOrCreate({
+          where: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'UNIDAD'
+          },
+          defaults: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'UNIDAD',
+            descripcion: 'Venta por unidad individual',
+            cantidad_base: 1,
+            es_cantidad_variable: false,
+            minimo_cantidad: 1,
+            precio_costo: precioCosto,
+            precio_neto: precioBase,
+            precio_neto_factura: precioFactura,
+            activo: true
+          }
+        });
+
+        // 2. PAQUETE - 10 unidades con descuento
+        const precioPaqueteCosto = Math.round(precioCosto * 10 * 0.85);
+        const precioPaqueteNeto = Math.round(precioBase * 10 * 0.85);
+        const precioPaqueteFactura = Math.round(precioFactura * 10 * 0.85);
+
+        const [modalidadPaquete, creadoPaquete] = await ModalidadProducto.findOrCreate({
+          where: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'PAQUETE'
+          },
+          defaults: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'PAQUETE',
+            descripcion: 'Paquete de 10 unidades',
+            cantidad_base: 10,
+            es_cantidad_variable: false,
+            minimo_cantidad: 10,
+            precio_costo: precioPaqueteCosto,
+            precio_neto: precioPaqueteNeto,
+            precio_neto_factura: precioPaqueteFactura,
+            activo: true
+          }
+        });
+
+        if (creadoUnidad) modalidadesCreadas++;
+        if (creadoPaquete) modalidadesCreadas++;
+        
+        console.log(`      ✓ Unidad ($${precioBase}) y Paquete ($${precioPaqueteNeto})`);
+
+      } else {
+        // MODALIDAD POR DEFECTO para otros tipos
+        const [modalidadDefault, creadoDefault] = await ModalidadProducto.findOrCreate({
+          where: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'UNIDAD'
+          },
+          defaults: {
+            id_variante_producto: variante.id_variante_producto,
+            nombre: 'UNIDAD',
+            descripcion: 'Venta estándar',
+            cantidad_base: 1,
+            es_cantidad_variable: false,
+            minimo_cantidad: 1,
+            precio_costo: producto.precio_costo_base || 0,
+            precio_neto: producto.precio_neto_base || 0,
+            precio_neto_factura: producto.precio_neto_factura_base || 0,
+            activo: true
+          }
+        });
+
+        if (creadoDefault) modalidadesCreadas++;
+        console.log(`      ✓ Unidad ($${producto.precio_neto_base || 0})`);
+      }
+    }
+
+    console.log(`   📊 Total modalidades creadas: ${modalidadesCreadas}`);
+    console.log('✅ Modalidades creadas exitosamente');
+    
+  } catch (error) {
+    console.error('❌ Error creando modalidades:', error);
+    throw error;
+  }
 }
 
 async function adjustModalitiesPrices() {
-  // Ajuste de precios específicos si es necesario
-  console.log('✅ Ajuste de precios completado');
+  console.log('💰 Verificando modalidades creadas...');
+  
+  try {
+    // Obtener estadísticas básicas
+    const totalModalidades = await ModalidadProducto.count();
+    const totalVariantes = await VarianteProducto.count();
+    
+    console.log(`   📊 Variantes: ${totalVariantes}, Modalidades: ${totalModalidades}`);
+
+    if (totalModalidades === 0) {
+      console.log('⚠️  No se encontraron modalidades');
+      return;
+    }
+
+    // Obtener todas las modalidades una por una para mostrar resumen
+    const modalidades = await ModalidadProducto.findAll();
+    
+    console.log('   📋 Modalidades disponibles:');
+    console.log('   ┌─────────────────────────────────────────────────────────┐');
+    console.log('   │ SKU              │ Modalidad │ Precio  │ Base    │ Var  │');
+    console.log('   ├─────────────────────────────────────────────────────────┤');
+    
+    const estadisticas = {
+      metro: 0,
+      rollo: 0,
+      unidad: 0,
+      paquete: 0
+    };
+
+    for (const modalidad of modalidades) {
+      // Obtener variante y producto
+      const variante = await VarianteProducto.findByPk(modalidad.id_variante_producto);
+      if (!variante) continue;
+      
+      const sku = variante.sku.padEnd(16).substring(0, 16);
+      const modalidadName = modalidad.nombre.padEnd(9).substring(0, 9);
+      const precio = `$${modalidad.precio_neto}`.padStart(7);
+      const base = `${modalidad.cantidad_base}`.padStart(7);
+      const variable = modalidad.es_cantidad_variable ? ' Sí' : ' No';
+      
+      console.log(`   │ ${sku} │ ${modalidadName} │ ${precio} │ ${base} │ ${variable} │`);
+      
+      // Contar estadísticas
+      const nombreLower = modalidad.nombre.toLowerCase();
+      if (nombreLower === 'metro') estadisticas.metro++;
+      else if (nombreLower === 'rollo') estadisticas.rollo++;
+      else if (nombreLower === 'unidad') estadisticas.unidad++;
+      else if (nombreLower === 'paquete') estadisticas.paquete++;
+    }
+    
+    console.log('   └─────────────────────────────────────────────────────────┘');
+    
+    console.log('   📊 Resumen por tipo:');
+    if (estadisticas.metro > 0) console.log(`      • METRO: ${estadisticas.metro} modalidades`);
+    if (estadisticas.rollo > 0) console.log(`      • ROLLO: ${estadisticas.rollo} modalidades`);
+    if (estadisticas.unidad > 0) console.log(`      • UNIDAD: ${estadisticas.unidad} modalidades`);
+    if (estadisticas.paquete > 0) console.log(`      • PAQUETE: ${estadisticas.paquete} modalidades`);
+
+    console.log('✅ Verificación completada');
+    
+  } catch (error) {
+    console.error('❌ Error verificando modalidades:', error);
+    throw error;
+  }
 }

@@ -70,6 +70,20 @@ CREATE TABLE roles (
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 1. Crear tabla de configuración del sistema
+CREATE TABLE configuracion_sistema (
+  id_configuracion INT AUTO_INCREMENT PRIMARY KEY,
+  clave VARCHAR(100) UNIQUE NOT NULL,
+  valor TEXT NOT NULL,
+  tipo ENUM('string', 'number', 'boolean', 'json') DEFAULT 'string',
+  descripcion VARCHAR(200),
+  categoria VARCHAR(50) DEFAULT 'general',
+  activa BOOLEAN DEFAULT TRUE,
+  createdAt  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedAt  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+
 -- Usuarios del sistema
 CREATE TABLE usuarios (
     id_usuario INT PRIMARY KEY AUTO_INCREMENT,
@@ -356,7 +370,7 @@ CREATE TABLE pedidos (
     observaciones TEXT,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
+    fecha_limite_reserva TIMESTAMP NULL,
     FOREIGN KEY (id_vendedor) REFERENCES usuarios(id_usuario),
     FOREIGN KEY (id_cliente) REFERENCES clientes(id_cliente),
     
@@ -367,6 +381,7 @@ CREATE TABLE pedidos (
     INDEX idx_estado (estado),
     INDEX idx_fecha_creacion (fecha_creacion),
     INDEX idx_tipo_documento (tipo_documento),
+    INDEX idx_estado_fecha_limite (estado, fecha_limite_reserva),
     -- ✅ ÍNDICE CORREGIDO PARA MySQL 8.0 - SIN FUNCIÓN DATE()
     INDEX idx_fecha_numero_diario (fecha_creacion, numero_diario)
 );
@@ -379,6 +394,7 @@ CREATE TABLE detalle_pedidos (
     -- RELACIONES: Necesitamos AMBOS para saber qué se vende y cómo
     id_variante_producto INT NOT NULL,      -- QUÉ variante/color específica se lleva
     id_modalidad INT NOT NULL,              -- CÓMO se vende (metro/rollo/set) y precio
+    id_bodega INT NULL,
     
     -- CANTIDADES Y PRECIOS
     cantidad DECIMAL(10,2) NOT NULL,                -- Permite decimales para metros, kilos, etc.
@@ -398,21 +414,24 @@ CREATE TABLE detalle_pedidos (
     -- INFORMACIÓN ADICIONAL
     observaciones TEXT,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+    metadatos JSON NULL,
     -- RELACIONES
     FOREIGN KEY (id_pedido) REFERENCES pedidos(id_pedido) ON DELETE CASCADE,
     FOREIGN KEY (id_variante_producto) REFERENCES variantes_producto(id_variante_producto),
     FOREIGN KEY (id_modalidad) REFERENCES modalidades_producto(id_modalidad),
     FOREIGN KEY (precio_autorizado_por) REFERENCES usuarios(id_usuario),
-    
+    FOREIGN KEY (id_bodega) REFERENCES bodegas(id_bodega),
+
     -- ÍNDICES
-    INDEX idx_pedido (id_pedido),
+  INDEX idx_pedido (id_pedido),
     INDEX idx_variante_producto (id_variante_producto),
     INDEX idx_modalidad (id_modalidad),
     INDEX idx_tipo_precio (tipo_precio),
-    INDEX idx_precio_autorizado (precio_autorizado_por)
+    INDEX idx_precio_autorizado (precio_autorizado_por),
+    INDEX idx_bodega (id_bodega)
 );
 
+CREATE INDEX idx_pedidos_limite_reserva ON pedidos(fecha_limite_reserva);
 -- ==========================================================
 -- 5. GESTIÓN DE CAJA Y TURNOS
 -- ==========================================================
@@ -536,6 +555,10 @@ CREATE TABLE pagos (
     INDEX idx_metodo (id_metodo_pago),
     INDEX idx_fecha (fecha_pago)
 );
+
+
+
+
 
 -- ==========================================================
 -- 7. FUNCIONES PARA NUMERACIÓN DIARIA - ✅ CORREGIDAS
@@ -706,6 +729,7 @@ DELIMITER ;
 -- ==========================================================
 DELIMITER $$
 
+/*
 -- Trigger: Crear modalidades automáticamente al crear variante
 CREATE TRIGGER tr_crear_modalidades_variante
     AFTER INSERT ON variantes_producto
@@ -714,7 +738,7 @@ BEGIN
     IF (SELECT COUNT(*) FROM modalidades_producto WHERE id_variante_producto = NEW.id_variante_producto) = 0 THEN
         CALL crear_modalidades_para_variante(NEW.id_variante_producto);
     END IF;
-END$$
+END$$*/
 
 -- Trigger: Validar modalidad-variante y calcular subtotal
 CREATE TRIGGER tr_detalle_pedidos_validacion

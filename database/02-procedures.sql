@@ -1,6 +1,6 @@
 -- ==========================================================
 -- SANTITELAS - PROCEDURES ALMACENADOS
--- Versión corregida para Docker MySQL
+-- Versión corregida para Docker MySQL + MANEJO DE RESERVAS
 -- ==========================================================
 
 DELIMITER $$
@@ -583,7 +583,337 @@ BEGIN
     
 END$$
 
+-- ==========================================================
+-- 7. PROCEDURE: crear_reserva_stock (NUEVO)
+-- Crea una reserva temporal de stock para un vale
+-- ==========================================================
+CREATE PROCEDURE crear_reserva_stock(
+    IN p_id_pedido INT,
+    IN p_id_variante INT,
+    IN p_id_bodega INT,
+    IN p_cantidad DECIMAL(10,2)
+)
+BEGIN
+    DECLARE v_stock_disponible DECIMAL(10,2) DEFAULT 0;
+    DECLARE v_producto_desc VARCHAR(200);
+    DECLARE v_error_msg VARCHAR(500);
+    
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    -- Obtener descripción del producto para mensajes de error
+    SELECT CONCAT(p.nombre, ' - ', COALESCE(vp.color, ''), ' ', COALESCE(vp.medida, ''))
+    INTO v_producto_desc
+    FROM variantes_producto vp
+    JOIN productos p ON vp.id_producto = p.id_producto
+    WHERE vp.id_variante_producto = p_id_variante;
+    
+    -- Obtener stock disponible actual con bloqueo
+    SELECT cantidad_disponible 
+    INTO v_stock_disponible
+    FROM stock_por_bodega 
+    WHERE id_variante_producto = p_id_variante
+      AND id_bodega = p_id_bodega
+    FOR UPDATE;
+    
+    -- Validar stock suficiente
+    IF v_stock_disponible < p_cantidad THEN
+        SET v_error_msg = CONCAT(
+            'Stock insuficiente para reservar: ', v_producto_desc,
+            '. Disponible: ', v_stock_disponible, 
+            ', Requerido: ', p_cantidad
+        );
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_error_msg;
+    END IF;
+    
+    -- Actualizar stock: mover de disponible a reservado
+    UPDATE stock_por_bodega 
+    SET cantidad_disponible = cantidad_disponible - p_cantidad,
+        cantidad_reservada = cantidad_reservada + p_cantidad,
+        fecha_actualizacion = NOW()
+    WHERE id_variante_producto = p_id_variante
+      AND id_bodega = p_id_bodega
+      AND cantidad_disponible >= p_cantidad;
+    
+    IF ROW_COUNT() = 0 THEN
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'No se pudo actualizar el stock para crear la reserva';
+    END IF;
+    
+    -- Registrar movimiento de reserva
+    INSERT INTO movimientos_stock (
+        id_variante_producto,
+        id_bodega,
+        tipo_movimiento,
+        cantidad,
+        stock_anterior,
+        stock_nuevo,
+        motivo,
+        referencia,
+        id_usuario,
+        fecha_movimiento
+    ) VALUES (
+        p_id_variante,
+        p_id_bodega,
+        'ajuste',
+        p_cantidad,
+        v_stock_disponible,
+        v_stock_disponible - p_cantidad,
+        CONCAT('Reserva temporal para vale #', p_id_pedido),
+        CONCAT('VALE-', p_id_pedido),
+        1, -- Sistema
+        NOW()
+    );
+    
+    COMMIT;
+END$$
+
+-- ==========================================================
+-- 8. PROCEDURE: liberar_reservas_pedido (NUEVO)
+-- Libera todas las reservas de un pedido específico
+-- ==========================================================
+CREATE PROCEDURE liberar_reservas_pedido(IN p_id_pedido INT)
+BEGIN
+    DECLARE v_id_variante INT;
+    DECLARE v_id_bodega INT;
+    DECLARE v_cantidad DECIMAL(10,2);
+    DECLARE v_terminado INT DEFAULT FALSE;
+    DECLARE v_items_liberados INT DEFAULT 0;
+    
+    -- Cursor para recorrer los detalles del pedido con bodega asignada
+    DECLARE cur CURSOR FOR
+        SELECT dp.id_variante_producto, 
+               COALESCE(dp.id_bodega, JSON_UNQUOTE(JSON_EXTRACT(dp.metadatos, '$.bodega_asignada'))),
+               dp.cantidad
+        FROM detalle_pedidos dp
+        WHERE dp.id_pedido = p_id_pedido
+          AND (dp.id_bodega IS NOT NULL 
+               OR JSON_EXTRACT(dp.metadatos, '$.bodega_asignada') IS NOT NULL);
+    
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_terminado = TRUE;
+    
+    -- Abrir cursor
+    OPEN cur;
+    
+    read_loop: LOOP
+        FETCH cur INTO v_id_variante, v_id_bodega, v_cantidad;
+        
+        IF v_terminado THEN
+            LEAVE read_loop;
+        END IF;
+        
+        -- Solo procesar si hay bodega válida
+        IF v_id_bodega IS NOT NULL THEN
+            -- Devolver stock reservado a disponible
+            UPDATE stock_por_bodega 
+            SET cantidad_disponible = cantidad_disponible + v_cantidad,
+                cantidad_reservada = GREATEST(0, cantidad_reservada - v_cantidad),
+                fecha_actualizacion = NOW()
+            WHERE id_variante_producto = v_id_variante
+              AND id_bodega = v_id_bodega
+              AND cantidad_reservada >= v_cantidad;
+            
+            IF ROW_COUNT() > 0 THEN
+                SET v_items_liberados = v_items_liberados + 1;
+                
+                -- Registrar movimiento de liberación
+                INSERT INTO movimientos_stock (
+                    id_variante_producto,
+                    id_bodega,
+                    tipo_movimiento,
+                    cantidad,
+                    stock_anterior,
+                    stock_nuevo,
+                    motivo,
+                    referencia,
+                    id_usuario,
+                    fecha_movimiento
+                ) VALUES (
+                    v_id_variante,
+                    v_id_bodega,
+                    'ajuste',
+                    v_cantidad,
+                    0, -- No tenemos el valor anterior aquí
+                    0, -- No tenemos el valor nuevo aquí
+                    'Liberación de reserva por expiración',
+                    CONCAT('VALE-', p_id_pedido, '-LIBERADO'),
+                    1, -- Sistema
+                    NOW()
+                );
+            END IF;
+        END IF;
+    END LOOP;
+    
+    CLOSE cur;
+    
+    -- Actualizar estado del pedido a cancelado/expirado
+    UPDATE pedidos 
+    SET estado = 'cancelado',
+        observaciones = CONCAT(COALESCE(observaciones, ''), 
+                             '\n[RESERVA LIBERADA AUTOMÁTICAMENTE - ', NOW(), 
+                             ' - Items liberados: ', v_items_liberados, ']'),
+        fecha_actualizacion = NOW()
+    WHERE id_pedido = p_id_pedido
+      AND estado = 'vale_pendiente';
+END$$
+
+-- ==========================================================
+-- 9. PROCEDURE: limpiar_reservas_expiradas (NUEVO)
+-- Limpia todas las reservas de pedidos expirados
+-- ==========================================================
+CREATE PROCEDURE limpiar_reservas_expiradas()
+BEGIN
+    DECLARE v_id_pedido INT;
+    DECLARE v_terminado INT DEFAULT FALSE;
+    DECLARE v_pedidos_procesados INT DEFAULT 0;
+    DECLARE v_fecha_actual TIMESTAMP DEFAULT NOW();
+    
+    -- Cursor para pedidos expirados
+    DECLARE cur CURSOR FOR
+        SELECT id_pedido
+        FROM pedidos
+        WHERE estado = 'vale_pendiente'
+          AND fecha_limite_reserva IS NOT NULL
+          AND fecha_limite_reserva < v_fecha_actual;
+    
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_terminado = TRUE;
+    
+    -- Log de inicio
+    INSERT INTO movimientos_stock (
+        id_variante_producto, id_bodega, tipo_movimiento,
+        cantidad, stock_anterior, stock_nuevo,
+        motivo, referencia, id_usuario
+    ) VALUES (
+        1, 1, 'ajuste', 0, 0, 0,
+        CONCAT('INICIO limpieza de reservas expiradas - ', v_fecha_actual),
+        'SISTEMA-LIMPIEZA', 1
+    );
+    
+    -- Abrir cursor
+    OPEN cur;
+    
+    read_loop: LOOP
+        FETCH cur INTO v_id_pedido;
+        
+        IF v_terminado THEN
+            LEAVE read_loop;
+        END IF;
+        
+        -- Liberar reservas del pedido
+        CALL liberar_reservas_pedido(v_id_pedido);
+        
+        SET v_pedidos_procesados = v_pedidos_procesados + 1;
+    END LOOP;
+    
+    CLOSE cur;
+    
+    -- Log de fin
+    INSERT INTO movimientos_stock (
+        id_variante_producto, id_bodega, tipo_movimiento,
+        cantidad, stock_anterior, stock_nuevo,
+        motivo, referencia, id_usuario
+    ) VALUES (
+        1, 1, 'ajuste', 0, 0, 0,
+        CONCAT('FIN limpieza de reservas - Pedidos procesados: ', v_pedidos_procesados),
+        'SISTEMA-LIMPIEZA', 1
+    );
+END$$
+
+-- ==========================================================
+-- 10. PROCEDURE: procesar_venta_con_reservas (NUEVO)
+-- Procesa una venta convirtiendo las reservas en salidas definitivas
+-- ==========================================================
+CREATE PROCEDURE procesar_venta_con_reservas(
+    IN p_id_pedido INT,
+    IN p_id_usuario INT
+)
+BEGIN
+    DECLARE v_id_variante INT;
+    DECLARE v_id_bodega INT;
+    DECLARE v_cantidad DECIMAL(10,2);
+    DECLARE v_terminado INT DEFAULT FALSE;
+    DECLARE v_items_procesados INT DEFAULT 0;
+    DECLARE v_error_msg VARCHAR(500);
+    
+    -- Cursor para detalles con bodega asignada
+    DECLARE cur CURSOR FOR
+        SELECT dp.id_variante_producto, 
+               COALESCE(dp.id_bodega, JSON_UNQUOTE(JSON_EXTRACT(dp.metadatos, '$.bodega_asignada'))),
+               dp.cantidad
+        FROM detalle_pedidos dp
+        WHERE dp.id_pedido = p_id_pedido
+          AND (dp.id_bodega IS NOT NULL 
+               OR JSON_EXTRACT(dp.metadatos, '$.bodega_asignada') IS NOT NULL);
+    
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_terminado = TRUE;
+    
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    -- Abrir cursor
+    OPEN cur;
+    
+    read_loop: LOOP
+        FETCH cur INTO v_id_variante, v_id_bodega, v_cantidad;
+        
+        IF v_terminado THEN
+            LEAVE read_loop;
+        END IF;
+        
+        IF v_id_bodega IS NOT NULL THEN
+            -- Convertir reserva en salida definitiva
+            UPDATE stock_por_bodega 
+            SET cantidad_reservada = GREATEST(0, cantidad_reservada - v_cantidad),
+                fecha_actualizacion = NOW()
+            WHERE id_variante_producto = v_id_variante
+              AND id_bodega = v_id_bodega;
+            
+            IF ROW_COUNT() = 0 THEN
+                SET v_error_msg = CONCAT(
+                    'No se pudo procesar la reserva para variante ', v_id_variante,
+                    ' en bodega ', v_id_bodega
+                );
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_error_msg;
+            END IF;
+            
+            SET v_items_procesados = v_items_procesados + 1;
+        END IF;
+    END LOOP;
+    
+    CLOSE cur;
+    
+    -- Actualizar estado del pedido
+    UPDATE pedidos 
+    SET estado = 'completado',
+        fecha_actualizacion = NOW()
+    WHERE id_pedido = p_id_pedido;
+    
+    COMMIT;
+END$$
+
 DELIMITER ;
+
+-- ==========================================================
+-- CREAR EVENT SCHEDULER PARA LIMPIEZA AUTOMÁTICA
+-- ==========================================================
+
+-- Habilitar el Event Scheduler
+SET GLOBAL event_scheduler = ON;
+
+-- Crear evento que se ejecuta cada 5 minutos
+CREATE EVENT IF NOT EXISTS limpiar_reservas_event
+ON SCHEDULE EVERY 5 MINUTE
+DO CALL limpiar_reservas_expiradas();
 
 -- ==========================================================
 -- VERIFICACIÓN DE PROCEDURES CREADOS
@@ -596,3 +926,11 @@ SELECT
 FROM information_schema.ROUTINES 
 WHERE ROUTINE_SCHEMA = DATABASE() 
 AND ROUTINE_TYPE = 'PROCEDURE';
+
+-- Verificar Event Scheduler
+SELECT 
+    '📅 EVENT SCHEDULER STATUS' AS titulo,
+    @@event_scheduler AS estado,
+    COUNT(*) AS eventos_activos
+FROM information_schema.EVENTS
+WHERE EVENT_SCHEMA = DATABASE();
