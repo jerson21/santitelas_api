@@ -332,7 +332,7 @@ async function createUsers() {
       password: 'vendedor123',
       nombre_completo: 'Vendedor',
       email: 'juan@santitelas.cl',
-      id_rol: 3,
+      id_rol: 4,
       activo: true
     },
     {
@@ -340,7 +340,7 @@ async function createUsers() {
       password: 'bodega123',
       nombre_completo: 'Bodega',
       email: 'carlos@santitelas.cl',
-      id_rol: 4,
+      id_rol: 3,
       activo: true
     }
   ];
@@ -410,64 +410,57 @@ async function createUserSafely(userData: any) {
 // ===== DATOS DE EJEMPLO PARA DESARROLLO =====
 
 async function createProducts() {
-  // Verificar si ya existen categorías
-  const telasCategory = await Categoria.findOne({ where: { nombre: 'TELAS' } });
-  const corchetesCategory = await Categoria.findOne({ where: { nombre: 'CORCHETES' } });
-  
-  if (!telasCategory || !corchetesCategory) {
-    console.log('⚠️  Categorías no encontradas, omitiendo productos');
-    return;
-  }
+  // Crear categorías necesarias
+  const [telasCategory] = await Categoria.findOrCreate({
+    where: { nombre: 'TELAS' },
+    defaults: { nombre: 'TELAS', descripcion: 'Telas en general', activa: true }
+  });
+
+  const [corchetesCategory] = await Categoria.findOrCreate({
+    where: { nombre: 'CORCHETES' },
+    defaults: { nombre: 'CORCHETES', descripcion: 'Corchetes y accesorios de cierre', activa: true }
+  });
+
+  const [hilosCategory] = await Categoria.findOrCreate({
+    where: { nombre: 'HILOS' },
+    defaults: { nombre: 'HILOS', descripcion: 'Hilos para costura', activa: true }
+  });
+
+  const [accesoriosCategory] = await Categoria.findOrCreate({
+    where: { nombre: 'ACCESORIOS' },
+    defaults: { nombre: 'ACCESORIOS', descripcion: 'Accesorios varios', activa: true }
+  });
 
   const productos = [
-    {
-      codigo: 'LIN-GUCCI-001',
-      nombre: 'GUCCI',
-      descripcion: 'Línea GUCCI de telas de lino premium',
-      id_categoria: telasCategory.id_categoria,
-      tipo: 'LINO',
-      unidad_medida: 'metro',
-      precio_costo_base: 2500,
-      precio_neto_base: 3800,
-      precio_neto_factura_base: 3193,
-      activo: true
-    },
-    {
-      codigo: 'LIN-GABANNA-001',
-      nombre: 'Gabanna',
-      descripcion: 'Línea Gabanna de telas de lino',
-      id_categoria: telasCategory.id_categoria,
-      tipo: 'LINO',
-      unidad_medida: 'metro',
-      precio_costo_base: 2300,
-      precio_neto_base: 3500,
-      precio_neto_factura_base: 2941,
-      activo: true
-    },
-    {
-      codigo: 'FEL-SANTI-001',
-      nombre: 'SANTI PREMIUM',
-      descripcion: 'Línea premium de felpa suave',
-      id_categoria: telasCategory.id_categoria,
-      tipo: 'FELPA',
-      unidad_medida: 'metro',
-      precio_costo_base: 1800,
-      precio_neto_base: 2500,
-      precio_neto_factura_base: 2101,
-      activo: true
-    },
-    {
-      codigo: 'COR-MEDIDAS-001',
-      nombre: 'Corchetes',
-      descripcion: 'Corchetes metálicos de diferentes medidas',
-      id_categoria: corchetesCategory.id_categoria,
-      tipo: 'CORCHETES',
-      unidad_medida: 'unidad',
-      precio_costo_base: 0,
-      precio_neto_base: 0,
-      precio_neto_factura_base: 0,
-      activo: true
-    }
+    // ===== TELAS LINO =====
+    { codigo: 'LIN-GUCCI', nombre: 'GUCCI SANTI', descripcion: 'Tela de lino Gucci Santi', id_categoria: telasCategory.id_categoria, tipo: 'LINO', unidad_medida: 'metro', activo: true },
+    { codigo: 'LIN-GABANNA', nombre: 'GABANNA', descripcion: 'Tela de lino Gabanna', id_categoria: telasCategory.id_categoria, tipo: 'LINO', unidad_medida: 'metro', activo: true },
+    { codigo: 'LIN-CARTIER', nombre: 'CARTIER', descripcion: 'Tela de lino Cartier', id_categoria: telasCategory.id_categoria, tipo: 'LINO', unidad_medida: 'metro', activo: true },
+    { codigo: 'LIN-DIOR', nombre: 'DIOR', descripcion: 'Tela de lino Dior', id_categoria: telasCategory.id_categoria, tipo: 'LINO', unidad_medida: 'metro', activo: true },
+    { codigo: 'LIN-COZUMEL', nombre: 'COZUMEL', descripcion: 'Tela de lino Cozumel', id_categoria: telasCategory.id_categoria, tipo: 'LINO', unidad_medida: 'metro', activo: true },
+    { codigo: 'LIN-TOKIO', nombre: 'TOKIO', descripcion: 'Tela de lino Tokio', id_categoria: telasCategory.id_categoria, tipo: 'LINO', unidad_medida: 'metro', activo: true },
+    { codigo: 'LIN-VERNACCI', nombre: 'VERNACCI', descripcion: 'Tela de lino Vernacci', id_categoria: telasCategory.id_categoria, tipo: 'LINO', unidad_medida: 'metro', activo: true },
+
+    // ===== CORCHETES =====
+    { codigo: 'COR-7112', nombre: 'Corchete 7112', descripcion: 'Corchete medida 7112', id_categoria: corchetesCategory.id_categoria, tipo: 'CORCHETES', unidad_medida: 'unidad', activo: true },
+    { codigo: 'COR-1450', nombre: 'Corchete 1450', descripcion: 'Corchete medida 1450', id_categoria: corchetesCategory.id_categoria, tipo: 'CORCHETES', unidad_medida: 'unidad', activo: true },
+    { codigo: 'COR-8012', nombre: 'Corchete 8012', descripcion: 'Corchete medida 8012', id_categoria: corchetesCategory.id_categoria, tipo: 'CORCHETES', unidad_medida: 'unidad', activo: true },
+    { codigo: 'COR-1445', nombre: 'Corchete 1445', descripcion: 'Corchete medida 1445', id_categoria: corchetesCategory.id_categoria, tipo: 'CORCHETES', unidad_medida: 'unidad', activo: true },
+
+    // ===== HILOS =====
+    { codigo: 'HIL-5000MT', nombre: 'Hilos 5000mt', descripcion: 'Hilos de 5000 metros o yardas', id_categoria: hilosCategory.id_categoria, tipo: 'HILOS', unidad_medida: 'unidad', activo: true },
+
+    // ===== ACCESORIOS =====
+    { codigo: 'ACC-PATA-CAMA', nombre: 'Pata de cama plástica', descripcion: 'Pata de cama plástica', id_categoria: accesoriosCategory.id_categoria, tipo: 'ACCESORIOS', unidad_medida: 'unidad', activo: true },
+    { codigo: 'ACC-PATIN', nombre: 'Patín', descripcion: 'Patín 10000', id_categoria: accesoriosCategory.id_categoria, tipo: 'ACCESORIOS', unidad_medida: 'unidad', activo: true },
+
+    // ===== TELAS FELPA =====
+    { codigo: 'FEL-SANTI', nombre: 'FELPA SANTI', descripcion: 'Felpa Santi premium', id_categoria: telasCategory.id_categoria, tipo: 'FELPA', unidad_medida: 'metro', activo: true },
+    { codigo: 'FEL-ECONOMICA', nombre: 'FELPA ECONOMICA', descripcion: 'Felpa económica', id_categoria: telasCategory.id_categoria, tipo: 'FELPA', unidad_medida: 'metro', activo: true },
+
+    // ===== TAFFETAN =====
+    { codigo: 'TAF-ECONOMICO', nombre: 'TAFFETAN ECONOMICO', descripcion: 'Taffetan económico', id_categoria: telasCategory.id_categoria, tipo: 'TAFFETAN', unidad_medida: 'metro', activo: true },
+    { codigo: 'TAF-PRO', nombre: 'TAFFETAN PRO', descripcion: 'Taffetan profesional', id_categoria: telasCategory.id_categoria, tipo: 'TAFFETAN', unidad_medida: 'metro', activo: true }
   ];
 
   for (const prod of productos) {
@@ -482,49 +475,221 @@ async function createProducts() {
 
 async function createVariants() {
   // Obtener productos creados
-  const gucci = await Producto.findOne({ where: { codigo: 'LIN-GUCCI-001' } });
-  const gabanna = await Producto.findOne({ where: { codigo: 'LIN-GABANNA-001' } });
-  const felpa = await Producto.findOne({ where: { codigo: 'FEL-SANTI-001' } });
-  const corchetes = await Producto.findOne({ where: { codigo: 'COR-MEDIDAS-001' } });
+  const productos = await Producto.findAll();
 
-  if (!gucci || !gabanna || !felpa || !corchetes) {
+  if (!productos || productos.length === 0) {
     console.log('⚠️  Productos no encontrados, omitiendo variantes');
     return;
   }
 
-  const variantes = [
-    // GUCCI
-    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-CRU', color: 'Crudo', descripcion: 'Lino Gucci color Blanco' },
-    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-NEG', color: 'Negro', descripcion: 'Lino Gucci color Negro' },
-    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-AZU', color: 'Azul', descripcion: 'Lino Gucci color Azul' },
-    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-ROJ', color: 'Rojo', descripcion: 'Lino Gucci color Rojo' },
-    { id_producto: gucci.id_producto, sku: 'LIN-GUCCI-VER', color: 'Verde', descripcion: 'Lino Gucci color Verde' },
-
-    // GABANNA
-    { id_producto: gabanna.id_producto, sku: 'LIN-GABANNA-CRU', color: 'Crudo', descripcion: 'Lino gabanna color Blanco' },
-    { id_producto: gabanna.id_producto, sku: 'LIN-GABANNA-NEG', color: 'Negro', descripcion: 'Lino gabanna color Negro' },
-    { id_producto: gabanna.id_producto, sku: 'LIN-GABANNA-GM', color: 'Gris medio', descripcion: 'Lino gabanna color Dorado' },
-    { id_producto: gabanna.id_producto, sku: 'LIN-GABANNA-BEIG', color: 'Beige', descripcion: 'Lino gabanna color Beige' },
-
-    // FELPA
-    { id_producto: felpa.id_producto, sku: 'FEL-SANTI-GRI', color: 'Gris', descripcion: 'Felpa santi color Gris' },
-    { id_producto: felpa.id_producto, sku: 'FEL-SANTI-AZU', color: 'Azul', descripcion: 'Felpa santi color Azul' },
-
-    // CORCHETES
-    { id_producto: corchetes.id_producto, sku: 'COR-7112', medida: '7112', descripcion: 'Corchete medida 71' },
-        { id_producto: corchetes.id_producto, sku: 'COR-8012', medida: '8012', descripcion: 'Corchete medida 8012' },
-    { id_producto: corchetes.id_producto, sku: 'COR-1445', medida: '1445', descripcion: 'Corchete medida 1445' },
-    { id_producto: corchetes.id_producto, sku: 'COR-1450', medida: '1450', descripcion: 'Corchete medida 1450' }
+  // Colores disponibles para telas
+  const coloresTelas = [
+    'GRIS CLARO', 'GRIS OSCURO', 'GRIS MEDIO', 'BEIGE', 'BEIGE OSCURO', 'CRUDO',
+    'NEGRO', 'ROJO', 'AZUL REY', 'AZUL MARINO', 'CAFE', 'CHOCOLATE'
   ];
 
-  for (const variante of variantes) {
-    await VarianteProducto.findOrCreate({
-      where: { sku: variante.sku },
-      defaults: { ...variante, activo: true }
+  // Función para generar SKU a partir del color
+  const generarSku = (codigoProducto: string, color: string) => {
+    const colorNormalizado = color.replace(/\s+/g, '-').toUpperCase();
+    return `${codigoProducto}-${colorNormalizado}`;
+  };
+
+  // Definición de variantes y precios según tus especificaciones
+  const variantesConPrecios: { codigo_producto: string; sku: string; color: string; precio_neto: number; precio_metro_rollo?: number }[] = [];
+
+  // ===== TELAS LINO CON COLORES =====
+  const telasPreciosLino = [
+    { codigo: 'LIN-GUCCI', precio: 2490 },
+    { codigo: 'LIN-GABANNA', precio: 2490 },
+    { codigo: 'LIN-CARTIER', precio: 2500 },
+    { codigo: 'LIN-DIOR', precio: 2800 },
+    { codigo: 'LIN-COZUMEL', precio: 2000 },
+    { codigo: 'LIN-TOKIO', precio: 1650 },
+    { codigo: 'LIN-VERNACCI', precio: 1800 },
+  ];
+
+  for (const tela of telasPreciosLino) {
+    for (const color of coloresTelas) {
+      variantesConPrecios.push({
+        codigo_producto: tela.codigo,
+        sku: generarSku(tela.codigo, color),
+        color: color,
+        precio_neto: tela.precio
+      });
+    }
+  }
+
+  // ===== TELAS FELPA CON COLORES =====
+  const telasPreciosFelpa = [
+    { codigo: 'FEL-SANTI', precio: 2490 },
+    { codigo: 'FEL-ECONOMICA', precio: 2000 },
+  ];
+
+  for (const tela of telasPreciosFelpa) {
+    for (const color of coloresTelas) {
+      variantesConPrecios.push({
+        codigo_producto: tela.codigo,
+        sku: generarSku(tela.codigo, color),
+        color: color,
+        precio_neto: tela.precio
+      });
+    }
+  }
+
+  // ===== TAFFETAN (solo color NEGRO) =====
+  // Precios por metro: normal y por rollo (mínimo 100m)
+  const telasPreciosTaffetan = [
+    { codigo: 'TAF-ECONOMICO', precioMetro: 400, precioMetroRollo: 320 },  // Económico: $320/m en rollo
+    { codigo: 'TAF-PRO', precioMetro: 450, precioMetroRollo: 360 },        // Pro: $360/m en rollo
+  ];
+
+  for (const tela of telasPreciosTaffetan) {
+    variantesConPrecios.push({
+      codigo_producto: tela.codigo,
+      sku: `${tela.codigo}-NEGRO`,
+      color: 'NEGRO',
+      precio_neto: tela.precioMetro,           // Precio por metro normal
+      precio_metro_rollo: tela.precioMetroRollo // Precio por metro en rollo (mín 100m)
     });
   }
 
-  console.log('✅ Variantes de productos creadas');
+  // ===== CORCHETES (sin colores, variante única) =====
+  const corchetes = [
+    { codigo: 'COR-7112', precio: 2000 },
+    { codigo: 'COR-1450', precio: 18000 },
+    { codigo: 'COR-8012', precio: 2500 },
+    { codigo: 'COR-1445', precio: 15000 },
+  ];
+
+  for (const corchete of corchetes) {
+    variantesConPrecios.push({
+      codigo_producto: corchete.codigo,
+      sku: `${corchete.codigo}-UNICO`,
+      color: 'Único',
+      precio_neto: corchete.precio
+    });
+  }
+
+  // ===== HILOS (colores variados) =====
+  const coloresHilos = ['Rojo', 'Verde', 'Amarillo', 'Azul', 'Negro', 'Blanco', 'Celeste', 'Rosado'];
+  for (const color of coloresHilos) {
+    variantesConPrecios.push({
+      codigo_producto: 'HIL-5000MT',
+      sku: `HIL-5000MT-${color.toUpperCase()}`,
+      color: color,
+      precio_neto: 3000
+    });
+  }
+
+  // ===== ACCESORIOS (sin colores, variante única) =====
+  const accesorios = [
+    { codigo: 'ACC-PATA-CAMA', precio: 1850 },
+    { codigo: 'ACC-PATIN', precio: 10000 },
+  ];
+
+  for (const acc of accesorios) {
+    variantesConPrecios.push({
+      codigo_producto: acc.codigo,
+      sku: `${acc.codigo}-UNICO`,
+      color: 'Único',
+      precio_neto: acc.precio
+    });
+  }
+
+  for (const varianteData of variantesConPrecios) {
+    const producto = await Producto.findOne({ where: { codigo: varianteData.codigo_producto } });
+
+    if (!producto) {
+      console.log(`⚠️  Producto ${varianteData.codigo_producto} no encontrado`);
+      continue;
+    }
+
+    const [varianteCreada, created] = await VarianteProducto.findOrCreate({
+      where: { sku: varianteData.sku },
+      defaults: {
+        id_producto: producto.id_producto,
+        sku: varianteData.sku,
+        color: varianteData.color,
+        descripcion: `${producto.nombre} - ${varianteData.color}`,
+        activo: true
+      }
+    });
+
+    // Crear modalidades con precios específicos
+    if (created) {
+      let modalidades: any[] = [];
+
+      if (producto.unidad_medida === 'metro') {
+        // Determinar configuración según tipo de producto
+        const esTaffetan = producto.tipo === 'TAFFETAN';
+        const minimoRollo = esTaffetan ? 100 : 30;
+
+        // Precio por metro en modalidad ROLLO
+        // Si tiene precio_metro_rollo (TAFFETAN), usarlo; sino calcular con descuento
+        const precioMetroRollo = varianteData.precio_metro_rollo ?? varianteData.precio_neto;
+
+        // Para telas: METRO y ROLLO
+        modalidades = [
+          {
+            id_variante_producto: varianteCreada.id_variante_producto,
+            nombre: 'METRO',
+            descripcion: 'Venta por metro',
+            cantidad_base: 1,
+            es_cantidad_variable: true,
+            minimo_cantidad: 0.5,
+            precio_costo: Math.round(varianteData.precio_neto * 0.6),
+            precio_neto: varianteData.precio_neto,  // Neto (sin IVA)
+            precio_neto_factura: Math.round(varianteData.precio_neto * 1.19),  // Bruto (con IVA)
+            afecto_descuento_ticket: true,
+            activa: true
+          },
+          {
+            id_variante_producto: varianteCreada.id_variante_producto,
+            nombre: 'ROLLO',
+            descripcion: `Venta por rollo (mínimo ${minimoRollo}m)`,
+            cantidad_base: 1,
+            es_cantidad_variable: true,
+            minimo_cantidad: minimoRollo,
+            precio_costo: Math.round(precioMetroRollo * 0.6),
+            precio_neto: precioMetroRollo,  // Neto (sin IVA)
+            precio_neto_factura: Math.round(precioMetroRollo * 1.19),  // Bruto (con IVA)
+            afecto_descuento_ticket: false,
+            activa: true
+          }
+        ];
+      } else {
+        // Para otros productos: UNIDAD
+        modalidades = [
+          {
+            id_variante_producto: varianteCreada.id_variante_producto,
+            nombre: 'UNIDAD',
+            descripcion: 'Venta por unidad',
+            cantidad_base: 1,
+            es_cantidad_variable: false,
+            minimo_cantidad: 1,
+            precio_costo: Math.round(varianteData.precio_neto * 0.6),
+            precio_neto: varianteData.precio_neto,  // Neto (sin IVA)
+            precio_neto_factura: Math.round(varianteData.precio_neto * 1.19),  // Bruto (con IVA)
+            afecto_descuento_ticket: true,
+            activa: true
+          }
+        ];
+      }
+
+      // Crear las modalidades
+      for (const modalidad of modalidades) {
+        await ModalidadProducto.findOrCreate({
+          where: {
+            id_variante_producto: varianteCreada.id_variante_producto,
+            nombre: modalidad.nombre
+          },
+          defaults: modalidad
+        });
+      }
+    }
+  }
+
+  console.log('✅ Variantes de productos creadas con modalidades');
 }
 
 async function createClients() {
@@ -538,7 +703,6 @@ async function createClients() {
       giro: 'Venta de textiles',
       direccion: 'Av. Principal 123',
       comuna: 'Santiago',
-      ciudad: 'Santiago',
       telefono: '+56912345678',
       email: 'contacto@textilesdelsur.cl',
       activo: true,
@@ -561,7 +725,6 @@ async function createClients() {
       giro: 'Confección de prendas',
       direccion: 'Calle Los Aromos 456',
       comuna: 'Providencia',
-      ciudad: 'Santiago',
       activo: true,
       datos_completos: true
     }
@@ -585,88 +748,65 @@ async function createInitialStock() {
     return;
   }
 
-  // Obtener algunas variantes para darles stock
-  const variantesGucci = await VarianteProducto.findAll({
-    where: { sku: ['LIN-GUCCI-CRU', 'LIN-GUCCI-NEG', 'LIN-GUCCI-AZU'] }
-  });
+  // Obtener TODAS las variantes creadas
+  const todasLasVariantes = await VarianteProducto.findAll();
 
-  const variantesVersace = await VarianteProducto.findAll({
-    where: { sku: ['LIN-GABANNA-CRU', 'LIN-GABANNA-NEG'] }
-  });
-
-  const variantesFelpa = await VarianteProducto.findAll({
-    where: { sku: ['FEL-SANTI-GRI', 'FEL-PREMIUM-AZU'] }
-  });
-
-  const variantesCorchetes = await VarianteProducto.findAll({
-    where: { sku: ['COR-7112', 'COR-8012', 'COR-1445'] }
-  });
-
-  // Stock para Gucci
-  for (const variante of variantesGucci) {
-    await StockPorBodega.findOrCreate({
-      where: {
-        id_variante_producto: variante.id_variante_producto,
-        id_bodega: bodegaSala.id_bodega
-      },
-      defaults: {
-        cantidad_disponible: Math.floor(Math.random() * 200) + 50,
-        cantidad_reservada: 0,
-        stock_minimo: 10,
-        stock_maximo: 300
-      }
-    });
+  if (!todasLasVariantes || todasLasVariantes.length === 0) {
+    console.log('⚠️  No hay variantes, omitiendo stock');
+    return;
   }
 
-  // Stock para Versace
-  for (const variante of variantesVersace) {
-    await StockPorBodega.findOrCreate({
-      where: {
-        id_variante_producto: variante.id_variante_producto,
-        id_bodega: bodegaSala.id_bodega
-      },
-      defaults: {
-        cantidad_disponible: Math.floor(Math.random() * 150) + 30,
+  // Crear stock para cada variante
+  for (const variante of todasLasVariantes) {
+    const producto = await Producto.findByPk(variante.id_producto);
+
+    let stockConfig;
+
+    // Determinar cantidades según el tipo de producto
+    if (producto?.tipo === 'LINO' || producto?.tipo === 'FELPA' || producto?.tipo === 'TAFFETAN') {
+      // Telas: stock en metros
+      stockConfig = {
+        cantidad_disponible: Math.floor(Math.random() * 200) + 100, // 100-300 metros
+        cantidad_reservada: 0,
+        stock_minimo: 20,
+        stock_maximo: 500
+      };
+    } else if (producto?.tipo === 'CORCHETES') {
+      // Corchetes: cantidades altas
+      stockConfig = {
+        cantidad_disponible: Math.floor(Math.random() * 5000) + 2000, // 2000-7000 unidades
+        cantidad_reservada: 0,
+        stock_minimo: 500,
+        stock_maximo: 10000
+      };
+    } else if (producto?.tipo === 'HILOS') {
+      // Hilos: cantidades medias
+      stockConfig = {
+        cantidad_disponible: Math.floor(Math.random() * 100) + 50, // 50-150 unidades
+        cantidad_reservada: 0,
+        stock_minimo: 10,
+        stock_maximo: 200
+      };
+    } else {
+      // Accesorios y otros: cantidades medias
+      stockConfig = {
+        cantidad_disponible: Math.floor(Math.random() * 50) + 20, // 20-70 unidades
         cantidad_reservada: 0,
         stock_minimo: 5,
-        stock_maximo: 200
-      }
-    });
-  }
+        stock_maximo: 100
+      };
+    }
 
-  // Stock para Felpa
-  for (const variante of variantesFelpa) {
     await StockPorBodega.findOrCreate({
       where: {
         id_variante_producto: variante.id_variante_producto,
         id_bodega: bodegaSala.id_bodega
       },
-      defaults: {
-        cantidad_disponible: Math.floor(Math.random() * 100) + 20,
-        cantidad_reservada: 0,
-        stock_minimo: 10,
-        stock_maximo: 150
-      }
+      defaults: stockConfig
     });
   }
 
-  // Stock para Corchetes (cantidades más altas)
-  for (const variante of variantesCorchetes) {
-    await StockPorBodega.findOrCreate({
-      where: {
-        id_variante_producto: variante.id_variante_producto,
-        id_bodega: bodegaSala.id_bodega
-      },
-      defaults: {
-        cantidad_disponible: Math.floor(Math.random() * 5000) + 1000,
-        cantidad_reservada: 0,
-        stock_minimo: 100,
-        stock_maximo: 10000
-      }
-    });
-  }
-
-  console.log('✅ Stock inicial creado');
+  console.log(`✅ Stock inicial creado para ${todasLasVariantes.length} variantes`);
 }
 
 async function createModalitiesForExistingVariants() {

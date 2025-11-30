@@ -93,6 +93,12 @@ export class ModalidadProducto extends Model {
     type: DataType.BOOLEAN,
     defaultValue: true
   })
+  afecto_descuento_ticket!: boolean;
+
+  @Column({
+    type: DataType.BOOLEAN,
+    defaultValue: true
+  })
   activa!: boolean;
 
   @Column({

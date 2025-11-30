@@ -70,14 +70,15 @@ services:
       - santitelas-network
 
   # ===== API BACKEND =====
+  # NOTA: Este es el archivo BASE
+  # Para desarrollo: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+  # Para producción: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # build y dockerfile se especifican en dev/prod
     container_name: santitelas-api
-    restart: unless-stopped
+
+    # Variables de entorno COMUNES (desarrollo y producción)
     environment:
-      NODE_ENV: development
       PORT: 5000
 
       # Base de datos
@@ -86,7 +87,7 @@ services:
       DB_NAME: santitelas
       DB_USER: santitelas_user
       DB_PASS: santitelas_pass_2024
-      
+
       # Timeouts para la conexión de la API
       DB_CONNECTION_TIMEOUT: 60000
       DB_REQUEST_TIMEOUT: 300000
@@ -102,10 +103,6 @@ services:
       # Frontend URLs
       FRONTEND_URL: http://localhost:3000,http://localhost:3001
 
-      # Configuración de entornos
-      SEED_DATABASE: true
-      FORCE_DEVELOPMENT_DATA: true
-
     ports:
       - "5000:5000"
     depends_on:
@@ -113,9 +110,8 @@ services:
         condition: service_healthy
     networks:
       - santitelas-network
-    volumes:
-      - ./src:/app/src  # Para hot reload en desarrollo
-      - ./logs/api:/app/logs  # Para logs de la API
+
+    # Los volúmenes específicos se configuran en dev/prod
 
 # ===== VOLÚMENES =====
 volumes:
@@ -149,27 +145,47 @@ networks:
 # - slow_query_log: Activado para identificar queries lentas
 # - general_log: Desactivado por defecto (activar solo para debug)
 # 
-# COMANDOS ÚTILES ACTUALIZADOS:
-# 
-# INICIAR TODO:
-# docker-compose up -d
-# 
+# COMANDOS ÚTILES:
+#
+# ========== DESARROLLO ==========
+# INICIAR EN MODO DESARROLLO (hot reload):
+# docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# RECONSTRUIR Y REINICIAR:
+# docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# DETENER:
+# docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
+#
+# ========== PRODUCCIÓN ==========
+# INICIAR EN MODO PRODUCCIÓN:
+# docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# DETENER:
+# docker-compose -f docker-compose.yml -f docker-compose.prod.yml down
+#
+# ========== LOGS ==========
 # VER LOGS EN TIEMPO REAL:
 # docker-compose logs -f mysql
 # docker-compose logs -f api
-# 
+#
 # VERIFICAR QUERIES LENTAS:
 # docker exec santitelas-mysql tail -f /var/log/mysql/slow.log
-# 
+#
+# ========== BASE DE DATOS ==========
 # CONECTAR A MySQL:
 # docker exec -it santitelas-mysql mysql -uroot -psantitelas_root_2024 santitelas
-# 
-# REINICIAR CON LIMPIEZA COMPLETA:
-# docker-compose down -v --remove-orphans && docker-compose up -d --build
-# 
+#
 # BACKUP DE LA BASE DE DATOS:
 # docker exec santitelas-mysql mysqldump -uroot -psantitelas_root_2024 --single-transaction --routines --triggers santitelas > backup_$(date +%Y%m%d_%H%M%S).sql
-# 
+#
 # RESTAURAR BACKUP:
 # docker exec -i santitelas-mysql mysql -uroot -psantitelas_root_2024 santitelas < backup.sql
+#
+# ========== LIMPIEZA ==========
+# REINICIAR CON LIMPIEZA COMPLETA:
+# docker-compose -f docker-compose.yml -f docker-compose.dev.yml down -v --remove-orphans
+# docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Ver documentación completa en DEPLOY.md
 # ===========================================

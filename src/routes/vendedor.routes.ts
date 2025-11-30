@@ -81,7 +81,7 @@ router.get('/productos', async (req, res, next) => {
               attributes: [
                 'id_modalidad', 'nombre', 'descripcion', 'cantidad_base',
                 'es_cantidad_variable', 'minimo_cantidad', 'precio_neto',
-                'precio_neto_factura', 'precio_costo'
+                'precio_neto_factura', 'precio_costo', 'afecto_descuento_ticket'
               ]
             },
             {
@@ -178,7 +178,8 @@ router.get('/productos', async (req, res, next) => {
             precio_neto: modalidad.precio_neto,
             precio_con_iva: Math.round(Number(modalidad.precio_neto_factura) * 1.19),
             es_variable: modalidad.es_cantidad_variable,
-            minimo: modalidad.minimo_cantidad
+            minimo: modalidad.minimo_cantidad,
+            afecto_descuento_ticket: modalidad.afecto_descuento_ticket
           }))
         }))
       };
@@ -221,7 +222,8 @@ function getModalidadesUnicas(modalidades: any[]): any[] {
         precio_neto: modalidad.precio_neto,
         precio_con_iva: Math.round(Number(modalidad.precio_neto_factura) * 1.19),
         es_variable: modalidad.es_cantidad_variable,
-        minimo: modalidad.minimo_cantidad
+        minimo: modalidad.minimo_cantidad,
+        afecto_descuento_ticket: modalidad.afecto_descuento_ticket
       });
     }
   });
@@ -345,6 +347,7 @@ router.get('/producto/:id', async (req, res, next) => {
             cantidad_base: modalidad.cantidad_base,
             es_cantidad_variable: modalidad.es_cantidad_variable,
             minimo_cantidad: modalidad.minimo_cantidad,
+            afecto_descuento_ticket: modalidad.afecto_descuento_ticket,
             precios: {
               neto: modalidad.precio_neto,
               factura: modalidad.precio_neto_factura,
@@ -1330,19 +1333,27 @@ router.get('/mis-vales', async (req, res, next) => {
 
     const pedidos = await Pedido.findAll({
       where: whereConditions,
-      include: [{
-        model: DetallePedido,
-        as: 'detalles',
-        include: [{
-          model: VarianteProducto,
-          as: 'varianteProducto',
+      include: [
+        {
+          model: DetallePedido,
+          as: 'detalles',
           include: [{
-            model: Producto,
-            as: 'producto',
-            attributes: ['nombre', 'codigo']
+            model: VarianteProducto,
+            as: 'varianteProducto',
+            include: [{
+              model: Producto,
+              as: 'producto',
+              attributes: ['nombre', 'codigo']
+            }]
           }]
-        }]
-      }],
+        },
+        {
+          model: Cliente,
+          as: 'cliente',
+          attributes: ['id_cliente', 'rut', 'nombre', 'razon_social'],
+          required: false
+        }
+      ],
       order: [['fecha_creacion', 'DESC']],
       limit: Number(limit)
     });
@@ -1350,12 +1361,21 @@ router.get('/mis-vales', async (req, res, next) => {
     const valesFormateados = pedidos.map(pedido => ({
       id_pedido: pedido.id_pedido,
       numero_pedido: pedido.numero_pedido,
+      numero_diario: pedido.numero_diario,
       estado: pedido.estado,
       estado_descripcion: (pedido as any).getEstadoDescripcion(),
       tipo_documento: pedido.tipo_documento,
       total: pedido.total,
       fecha_creacion: pedido.fecha_creacion,
-      total_productos: pedido.detalles?.length || 0
+      total_productos: pedido.detalles?.length || 0,
+      cliente: pedido.cliente ? {
+        id_cliente: pedido.cliente.id_cliente,
+        rut: pedido.cliente.rut,
+        nombre: pedido.cliente.nombre || pedido.cliente.razon_social || 'Sin nombre'
+      } : null,
+      nombre_cliente: pedido.cliente
+        ? (pedido.cliente.nombre || pedido.cliente.razon_social || 'Sin nombre')
+        : 'Sin cliente'
     }));
 
     res.json({
@@ -1464,4 +1484,311 @@ router.get('/vale/:numero_pedido', async (req, res, next) => {
     next(error);
   }
 });
+
+/**
+ * @openapi
+ * /vendedor/pedidos/{id}/detalles:
+ *   get:
+ *     summary: Obtener detalles completos de un pedido (para agregar productos)
+ *     tags:
+ *       - vendedor
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del pedido
+ */
+router.get('/pedidos/:id/detalles', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const vendedorId = req.user?.id;
+
+    console.log('🔍 Obteniendo detalles del pedido:', id);
+
+    // Obtener pedido (verificando que pertenezca al vendedor)
+    const pedido = await Pedido.findOne({
+      where: {
+        id_pedido: id,
+        id_vendedor: vendedorId
+      },
+      include: [
+        {
+          model: Cliente,
+          as: 'cliente',
+          attributes: ['id_cliente', 'rut', 'nombre', 'razon_social'],
+          required: false
+        }
+      ]
+    });
+
+    if (!pedido) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pedido no encontrado o no tienes permiso para verlo'
+      });
+    }
+
+    // Obtener detalles de productos
+    const detalles = await DetallePedido.findAll({
+      where: { id_pedido: id },
+      include: [
+        {
+          model: VarianteProducto,
+          as: 'varianteProducto',
+          include: [{
+            model: Producto,
+            as: 'producto',
+            attributes: ['id_producto', 'nombre', 'codigo', 'tipo', 'unidad_medida']
+          }]
+        },
+        {
+          model: ModalidadProducto,
+          as: 'modalidad',
+          attributes: ['id_modalidad', 'nombre', 'descripcion']
+        }
+      ]
+    });
+
+    // Formatear detalles para el frontend
+    const detallesFormateados = detalles.map(detalle => ({
+      id_detalle_pedido: detalle.id_detalle,
+      id_variante_producto: detalle.id_variante_producto,
+      id_modalidad: detalle.id_modalidad,
+      id_producto: detalle.varianteProducto?.producto?.id_producto,
+      nombre_producto: detalle.varianteProducto?.producto?.nombre,
+      codigo_producto: detalle.varianteProducto?.producto?.codigo,
+      tipo_producto: detalle.varianteProducto?.producto?.tipo,
+      unidad_medida: detalle.varianteProducto?.producto?.unidad_medida || 'metros',
+      sku: detalle.varianteProducto?.sku,
+      color_variante: detalle.varianteProducto?.color,
+      medida_variante: detalle.varianteProducto?.medida,
+      material_variante: detalle.varianteProducto?.material,
+      modalidad_nombre: detalle.modalidad?.nombre,
+      modalidad: detalle.modalidad?.nombre,
+      cantidad: detalle.cantidad,
+      precio_unitario: detalle.precio_unitario,
+      subtotal: detalle.subtotal,
+      observaciones: detalle.observaciones
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        pedido: {
+          id_pedido: pedido.id_pedido,
+          numero_pedido: pedido.numero_pedido,
+          numero_diario: pedido.numero_diario,
+          estado: pedido.estado,
+          tipo_documento: pedido.tipo_documento,
+          total: pedido.total,
+          fecha_creacion: pedido.fecha_creacion
+        },
+        cliente: pedido.cliente ? {
+          id_cliente: pedido.cliente.id_cliente,
+          rut: pedido.cliente.rut,
+          nombre: pedido.cliente.nombre || pedido.cliente.razon_social
+        } : null,
+        detalles: detallesFormateados
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo detalles del pedido:', error);
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /vendedor/pedidos/{id}/productos:
+ *   put:
+ *     summary: Agregar productos nuevos a un pedido existente
+ *     tags:
+ *       - vendedor
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del pedido
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               productos:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     id_variante_producto:
+ *                       type: integer
+ *                     id_modalidad:
+ *                       type: integer
+ *                     cantidad:
+ *                       type: number
+ *                     precio_unitario:
+ *                       type: number
+ *                     observaciones:
+ *                       type: string
+ */
+router.put('/pedidos/:id/productos', async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { id } = req.params;
+    const { productos } = req.body;
+    const vendedorId = req.user?.id;
+
+    console.log('📝 Agregando productos al pedido:', id);
+    console.log('📦 Productos nuevos:', productos);
+
+    // Validaciones
+    if (!Array.isArray(productos) || productos.length === 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Se requiere un array de productos'
+      });
+    }
+
+    // Verificar que el pedido existe, pertenece al vendedor y está pendiente
+    const pedido = await Pedido.findOne({
+      where: {
+        id_pedido: id,
+        id_vendedor: vendedorId,
+        estado: 'vale_pendiente'
+      },
+      transaction
+    });
+
+    if (!pedido) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Vale no encontrado, no tienes permiso o ya fue procesado'
+      });
+    }
+
+    // Validar cada producto
+    for (let i = 0; i < productos.length; i++) {
+      const producto = productos[i];
+
+      if (!producto.id_variante_producto || !producto.id_modalidad ||
+          !producto.cantidad || !producto.precio_unitario) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Producto ${i + 1}: Todos los campos son requeridos`
+        });
+      }
+
+      if (producto.cantidad <= 0 || producto.precio_unitario <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Producto ${i + 1}: Cantidad y precio deben ser mayores a 0`
+        });
+      }
+
+      // Verificar que la variante existe
+      const variante = await VarianteProducto.findByPk(producto.id_variante_producto, {
+        include: [{ model: Producto, as: 'producto', attributes: ['activo', 'nombre'] }],
+        transaction
+      });
+
+      if (!variante || !variante.activo || !variante.producto || !variante.producto.activo) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Producto ${i + 1}: Variante no encontrada o inactiva`
+        });
+      }
+
+      // Verificar que la modalidad existe y pertenece a la variante
+      const modalidad = await ModalidadProducto.findOne({
+        where: {
+          id_modalidad: producto.id_modalidad,
+          id_variante_producto: producto.id_variante_producto,
+          activa: true
+        },
+        transaction
+      });
+
+      if (!modalidad) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Producto ${i + 1}: Modalidad no encontrada o no pertenece a esta variante`
+        });
+      }
+    }
+
+    // Insertar productos nuevos
+    const productosCreados = [];
+    for (const producto of productos) {
+      const detalle = await DetallePedido.create({
+        id_pedido: id,
+        id_variante_producto: producto.id_variante_producto,
+        id_modalidad: producto.id_modalidad,
+        cantidad: producto.cantidad,
+        precio_unitario: producto.precio_unitario,
+        subtotal: Math.round(producto.cantidad * producto.precio_unitario),
+        observaciones: producto.observaciones || '',
+        fecha_creacion: new Date()
+      }, { transaction });
+
+      productosCreados.push(detalle);
+      console.log(`✅ Producto agregado: ${detalle.id_detalle}`);
+    }
+
+    // Recalcular total del pedido
+    const [resultado]: any = await sequelize.query(
+      `SELECT SUM(subtotal) as total FROM detalles_pedido WHERE id_pedido = ?`,
+      {
+        replacements: [id],
+        type: QueryTypes.SELECT,
+        transaction
+      }
+    );
+
+    const nuevoTotal = resultado.total || 0;
+
+    await pedido.update({
+      total: nuevoTotal,
+      subtotal: nuevoTotal,
+      fecha_actualizacion: new Date()
+    }, { transaction });
+
+    console.log('💰 Nuevo total del pedido:', nuevoTotal);
+
+    await transaction.commit();
+
+    res.json({
+      success: true,
+      message: `${productosCreados.length} productos agregados exitosamente al vale ${pedido.numero_diario || pedido.numero_pedido}`,
+      data: {
+        productos_agregados: productosCreados.length,
+        total_actualizado: nuevoTotal,
+        numero_pedido: pedido.numero_pedido,
+        numero_diario: pedido.numero_diario
+      }
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Error agregando productos al pedido:', error);
+    next(error);
+  }
+});
+
 export default router;

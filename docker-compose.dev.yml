@@ -1,0 +1,39 @@
+# ====================================
+# DOCKER COMPOSE - DESARROLLO
+# ====================================
+# Este archivo contiene configuraciones específicas para desarrollo
+# Úsalo junto con docker-compose.yml:
+#   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# ====================================
+
+version: '3.8'
+
+services:
+  api:
+    # Usar Dockerfile de desarrollo
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+
+    # Variables de entorno para desarrollo
+    environment:
+      NODE_ENV: development
+
+      # Activar seeding y datos de desarrollo
+      SEED_DATABASE: "true"
+      FORCE_DEVELOPMENT_DATA: "true"
+
+      # Logs más verbosos en desarrollo
+      LOG_LEVEL: debug
+
+    # Volúmenes para hot reload
+    volumes:
+      - ./src:/app/src              # Código fuente - hot reload automático
+      - ./logs/api:/app/logs        # Logs persistentes
+      - /app/node_modules           # Prevenir que node_modules local sobrescriba el del contenedor
+
+    # Comando explícito para desarrollo (opcional, ya está en Dockerfile.dev)
+    command: npm run dev
+
+    # En desarrollo, no usar restart automático agresivo
+    restart: unless-stopped

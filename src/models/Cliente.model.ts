@@ -58,6 +58,16 @@ export class Cliente extends Model {
   @Column(DataType.TEXT)
   direccion?: string;
 
+  @Column({
+    type: DataType.STRING(100)
+  })
+  comuna?: string;
+
+  @Column({
+    type: DataType.STRING(200)
+  })
+  giro?: string;
+
   // Control
   @Column({
     type: DataType.BOOLEAN,

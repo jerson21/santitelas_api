@@ -1,14 +1,36 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { auth } from '../middlewares/auth';
 import { Producto } from '../models/Producto.model';
 import { VarianteProducto } from '../models/VarianteProducto.model';
 import { ModalidadProducto } from '../models/ModalidadProducto.model';
 import { StockPorBodega } from '../models/StockPorBodega.model';
-
 import { Categoria } from '../models/Categoria.model';
 import { sequelize } from '../config/database';
 import { Op } from 'sequelize';
+// --- Interfaces para Tipado Fuerte ---
+// Estas interfaces definen la estructura esperada en el `req.body`
+// para las operaciones de creación y actualización.
 
+interface IModalidadBody {
+    nombre: string;
+    descripcion?: string;
+    cantidad_base?: number;
+    es_cantidad_variable?: boolean;
+    minimo_cantidad?: number;
+    precio_costo?: number;
+    precio_neto: number;
+    precio_factura: number; // El frontend lo envía así, aunque en BD sea precio_neto_factura
+    afecto_descuento_ticket?: boolean;
+}
+
+interface IOpcionBody {
+    color?: string;
+    medida?: string;
+    material?: string;
+    descripcion?: string;
+    stock_minimo?: number;
+    modalidades: IModalidadBody[];
+}
 const router = Router();
 router.use(auth);
 
@@ -134,235 +156,166 @@ router.use(auth);
  *       '409':
  *         description: Ya existe un producto con ese código
  */
-router.post('/', async (req, res, next) => {
-  const transaction = await sequelize.transaction();
-  try {
-    const {
-      categoria,
-      tipo,
-      modelo,
-      codigo,
-      descripcion,
-      unidad_medida = 'unidad',
-      stock_minimo_total = 0,
-      opciones = []
-    } = req.body;
+router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+    const transaction = await sequelize.transaction();
+    try {
+        const {
+            categoria,
+            tipo,
+            modelo,
+            codigo,
+            descripcion,
+            unidad_medida = 'unidad',
+            stock_minimo_total = 0,
+            opciones = [],
+            preciosBase // NUEVO: recibir precios base del frontend
+        } = req.body;
 
-    // Validaciones básicas
-    if (!categoria || !modelo) {
-      return res.status(400).json({
-        success: false,
-        message: 'Faltan campos requeridos: categoria, modelo'
-      });
-    }
-
-    // Buscar o crear categoría
-    let categoriaObj = await Categoria.findOne({
-      where: { nombre: categoria }
-    });
-    if (!categoriaObj) {
-      categoriaObj = await Categoria.create({
-        nombre: categoria,
-        descripcion: `Categoría ${categoria}`,
-        activa: true
-      }, { transaction });
-    }
-
-    // Generar código automáticamente si no se proporciona
-    let codigoFinal = codigo;
-    if (!codigoFinal) {
-      const prefijo = categoria.substring(0, 3).toUpperCase();
-      const tipoPrefix = tipo ? tipo.substring(0, 3).toUpperCase() : 'GEN';
-      const modeloPrefix = modelo.substring(0, 3).toUpperCase();
-      const ultimoProducto = await Producto.findOne({
-        where: {
-          codigo: {
-            [Op.like]: `${prefijo}-${tipoPrefix}-${modeloPrefix}-%`
-          }
-        },
-        order: [['codigo', 'DESC']],
-        transaction
-      });
-      let numeroSiguiente = 1;
-      if (ultimoProducto) {
-        const partes = ultimoProducto.codigo.split('-');
-        const ultimoNumero = parseInt(partes[partes.length - 1]);
-        if (!isNaN(ultimoNumero)) numeroSiguiente = ultimoNumero + 1;
-      }
-      codigoFinal = `${prefijo}-${tipoPrefix}-${modeloPrefix}-${numeroSiguiente.toString().padStart(3, '0')}`;
-    }
-
-    // Verificar que el código no exista
-    const productoExistente = await Producto.findOne({
-      where: { codigo: codigoFinal }
-    });
-    if (productoExistente) {
-      await transaction.rollback();
-      return res.status(409).json({
-        success: false,
-        message: `Ya existe un producto con el código ${codigoFinal}`
-      });
-    }
-
-    // Crear producto base
-    const producto = await Producto.create({
-      codigo: codigoFinal,
-      nombre: modelo,
-      descripcion,
-      id_categoria: categoriaObj.id_categoria,
-      tipo: tipo || null,
-      stock_minimo_total,
-      unidad_medida,
-      activo: true
-    }, { transaction });
-
-    // ✅ CREAR VARIANTES CON SUS MODALIDADES ESPECÍFICAS
-    let totalVariantes = 0;
-    let totalModalidades = 0;
-    
-    if (Array.isArray(opciones) && opciones.length > 0) {
-      for (const opcion of opciones) {
-        const { 
-          color, 
-          medida, 
-          material, 
-          descripcion: descVariante, 
-          stock_minimo = 0,
-          modalidades: modalidadesVariante = []
-        } = opcion;
-        
-        // Generar SKU único
-        const skuParts = [
-          codigoFinal,
-          color?.substring(0, 3).toUpperCase(),
-          medida,
-          material?.substring(0, 3).toUpperCase()
-        ].filter(Boolean);
-        const skuBase = skuParts.join('-');
-        let sku = skuBase;
-        let contador = 1;
-        while (await VarianteProducto.findOne({ where: { sku }, transaction })) {
-          sku = `${skuBase}-${contador}`;
-          contador++;
+        // Validaciones
+        if (!categoria || !modelo) {
+            return res.status(400).json({
+                success: false,
+                message: 'Faltan campos requeridos: categoria y modelo son obligatorios.'
+            });
         }
         
-        const variante = await VarianteProducto.create({
-          id_producto: producto.id_producto,
-          sku,
-          color,
-          medida,
-          material,
-          descripcion: descVariante,
-          stock_minimo,
-          activo: true
-        }, { transaction });
-        
-        totalVariantes++;
-
-        // ✅ CREAR MODALIDADES PARA ESTA VARIANTE ESPECÍFICA
-        if (Array.isArray(modalidadesVariante)) {
-          for (const modalidad of modalidadesVariante) {
-            const {
-              nombre,
-              descripcion: descModalidad,
-              cantidad_base = 1,
-              es_cantidad_variable = false,
-              minimo_cantidad = 0,
-              precio_costo = 0,
-              precio_neto,
-              precio_factura
-            } = modalidad;
-            
-            if (!nombre || !precio_neto || !precio_factura) {
-              await transaction.rollback();
-              return res.status(400).json({
+        if (!opciones || opciones.length === 0) {
+            return res.status(400).json({
                 success: false,
-                message: `Cada modalidad debe tener nombre, precio_neto y precio_factura. Error en variante: ${sku}`
-              });
+                message: 'Un producto nuevo debe tener al menos una variante (opción).'
+            });
+        }
+
+        // NUEVA VALIDACIÓN: Verificar que cada variante tenga modalidades con precios
+        for (const opcion of opciones) {
+            if (!opcion.modalidades || opcion.modalidades.length === 0) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    success: false,
+                    message: `La variante con color "${opcion.color || 'N/A'}" debe tener al menos una modalidad de venta.`
+                });
             }
             
-            await ModalidadProducto.create({
-              id_variante_producto: variante.id_variante_producto,
-              nombre: nombre.toUpperCase(),
-              descripcion: descModalidad,
-              cantidad_base,
-              es_cantidad_variable,
-              minimo_cantidad,
-              precio_costo,
-              precio_neto,
-              precio_neto_factura: precio_factura,
-              activa: true
-            }, { transaction });
-            
-            totalModalidades++;
-          }
+            for (const modalidad of opcion.modalidades) {
+                if (!modalidad.nombre || !modalidad.precio_neto || modalidad.precio_neto <= 0) {
+                    await transaction.rollback();
+                    return res.status(400).json({
+                        success: false,
+                        message: `Cada modalidad debe tener un nombre y precios válidos.`
+                    });
+                }
+                
+                // NUEVO: Validar que precio_factura sea coherente con precio_neto
+                const precio_factura_esperado = Math.round(modalidad.precio_neto * 1.19);
+                if (Math.abs(modalidad.precio_factura - precio_factura_esperado) > 1) {
+                    await transaction.rollback();
+                    return res.status(400).json({
+                        success: false,
+                        message: `El precio factura debe ser el precio neto + 19% IVA.`
+                    });
+                }
+            }
         }
-      }
-    } else {
-      // Si no se envían opciones, crear una variante estándar
-      const variante = await VarianteProducto.create({
-        id_producto: producto.id_producto,
-        sku: `${codigoFinal}-STD`,
-        descripcion: 'Variante estándar',
-        stock_minimo: 0,
-        activo: true
-      }, { transaction });
-      
-      totalVariantes++;
 
-      // Modalidades automáticas según unidad de medida
-      if (unidad_medida === 'metro') {
-        await ModalidadProducto.create({
-          id_variante_producto: variante.id_variante_producto,
-          nombre: 'METRO',
-          descripcion: 'Venta por metro',
-          cantidad_base: 1,
-          es_cantidad_variable: true,
-          minimo_cantidad: 0.1,
-          precio_costo: 0,
-          precio_neto: 1000,
-          precio_neto_factura: 840,
-          activa: true
+        // Crear categoría si no existe
+        let categoriaObj = await Categoria.findOne({ where: { nombre: categoria }, transaction });
+        if (!categoriaObj) {
+            categoriaObj = await Categoria.create({
+                nombre: categoria,
+                descripcion: `Categoría ${categoria}`,
+                activa: true
+            }, { transaction });
+        }
+
+        // Generar código si no viene
+        let codigoFinal = codigo;
+        if (!codigoFinal) {
+            const prefijo = categoria.substring(0, 3).toUpperCase();
+            const modeloPrefix = modelo.substring(0, 3).toUpperCase();
+            const timestamp = Date.now().toString().slice(-4);
+            codigoFinal = `${prefijo}-${modeloPrefix}-${timestamp}`;
+        }
+        
+        // Verificar código único
+        const productoExistente = await Producto.findOne({ where: { codigo: codigoFinal }, transaction });
+        if (productoExistente) {
+            await transaction.rollback();
+            return res.status(409).json({
+                success: false,
+                message: `Ya existe un producto con el código ${codigoFinal}`
+            });
+        }
+
+        // Crear producto
+        const producto = await Producto.create({
+            codigo: codigoFinal,
+            nombre: modelo,
+            descripcion,
+            id_categoria: categoriaObj.id_categoria,
+            tipo: tipo || null,
+            stock_minimo_total,
+            unidad_medida,
+            activo: true
         }, { transaction });
-        totalModalidades++;
-      } else {
-        await ModalidadProducto.create({
-          id_variante_producto: variante.id_variante_producto,
-          nombre: 'UNIDAD',
-          descripcion: 'Venta por unidad',
-          cantidad_base: 1,
-          es_cantidad_variable: false,
-          minimo_cantidad: 1,
-          precio_costo: 0,
-          precio_neto: 1000,
-          precio_neto_factura: 840,
-          activa: true
-        }, { transaction });
-        totalModalidades++;
-      }
+
+        // Crear variantes con modalidades
+        const variantesCreadas = [];
+        for (const opcion of opciones) {
+            const { color, medida, material, descripcion: descVariante, stock_minimo = 0, modalidades = [] } = opcion;
+            const sku = `${codigoFinal}-${variantesCreadas.length + 1}`;
+
+            const variante = await VarianteProducto.create({
+                id_producto: producto.id_producto,
+                sku, color, medida, material,
+                descripcion: descVariante,
+                stock_minimo,
+                activo: true
+            }, { transaction });
+
+            // IMPORTANTE: NO llamar al procedure crear_modalidades_para_variante
+            // Las modalidades vienen completas desde el frontend
+
+            const modalidadesCreadas = [];
+            for (const mod of modalidades) {
+                const modalidadCreada = await ModalidadProducto.create({
+                    id_variante_producto: variante.id_variante_producto,
+                    nombre: mod.nombre.toUpperCase(),
+                    descripcion: mod.descripcion,
+                    cantidad_base: mod.cantidad_base || 1,
+                    es_cantidad_variable: mod.es_cantidad_variable || false,
+                    minimo_cantidad: mod.minimo_cantidad || 0,
+                    precio_costo: mod.precio_costo || 0,
+                    precio_neto: mod.precio_neto,
+                    precio_neto_factura: mod.precio_factura, // Frontend envía precio_factura
+                    afecto_descuento_ticket: mod.afecto_descuento_ticket !== undefined ? mod.afecto_descuento_ticket : true,
+                    activa: true
+                }, { transaction });
+                modalidadesCreadas.push(modalidadCreada.toJSON());
+            }
+            
+            const varianteConModalidades: any = variante.toJSON();
+            varianteConModalidades.modalidades = modalidadesCreadas;
+            variantesCreadas.push(varianteConModalidades);
+        }
+
+        await transaction.commit();
+
+        const productoFinal: any = producto.toJSON();
+        productoFinal.categoria = categoriaObj.nombre;
+        productoFinal.opciones = variantesCreadas;
+
+        res.status(201).json({
+            success: true,
+            data: productoFinal,
+            message: `Producto '${modelo}' creado exitosamente con ${variantesCreadas.length} variantes.`
+        });
+
+    } catch (error) {
+        await transaction.rollback();
+        next(error);
     }
-
-    await transaction.commit();
-
-    res.status(201).json({
-      success: true,
-      data: {
-        id_producto: producto.id_producto,
-        categoria: categoriaObj.nombre,
-        tipo: tipo || null,
-        modelo: modelo,
-        codigo: codigoFinal,
-        total_variantes_creadas: totalVariantes,
-        total_modalidades_creadas: totalModalidades
-      },
-      message: `Producto creado exitosamente con ${totalVariantes} variantes y ${totalModalidades} modalidades`
-    });
-
-  } catch (error) {
-    await transaction.rollback();
-    next(error);
-  }
 });
+
 
 /**
  * @openapi
@@ -428,7 +381,8 @@ router.post('/:id/variante/:varianteId/modalidad', async (req, res, next) => {
       minimo_cantidad = 0,
       precio_costo = 0,
       precio_neto,
-      precio_factura
+      precio_factura,
+      afecto_descuento_ticket = true
     } = req.body;
 
     // Verificar que el producto existe
@@ -473,6 +427,7 @@ router.post('/:id/variante/:varianteId/modalidad', async (req, res, next) => {
       precio_costo,
       precio_neto,
       precio_neto_factura: precio_factura,
+      afecto_descuento_ticket,
       activa: true
     });
 
@@ -548,7 +503,7 @@ router.post('/:id/variante', async (req, res, next) => {
       material, 
       descripcion, 
       stock_minimo = 0,
-      modalidades = []
+      modalidades = [] // Las modalidades DEBEN venir del frontend
     } = req.body;
 
     const producto = await Producto.findByPk(id);
@@ -556,6 +511,14 @@ router.post('/:id/variante', async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: 'Producto no encontrado'
+      });
+    }
+
+    // VALIDAR que vengan modalidades
+    if (!modalidades || modalidades.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Debe incluir al menos una modalidad de venta con precios'
       });
     }
 
@@ -585,36 +548,36 @@ router.post('/:id/variante', async (req, res, next) => {
       activo: true
     }, { transaction });
 
-    // ✅ CREAR MODALIDADES PARA LA NUEVA VARIANTE
+    // NO LLAMAR AL PROCEDURE - crear modalidades directamente
     let totalModalidades = 0;
-    if (Array.isArray(modalidades)) {
-      for (const modalidad of modalidades) {
-        const {
-          nombre,
+    for (const modalidad of modalidades) {
+      const {
+        nombre,
+        descripcion: descModalidad,
+        cantidad_base = 1,
+        es_cantidad_variable = false,
+        minimo_cantidad = 0,
+        precio_costo = 0,
+        precio_neto,
+        precio_factura,
+        afecto_descuento_ticket = true
+      } = modalidad;
+
+      if (nombre && precio_neto && precio_factura) {
+        await ModalidadProducto.create({
+          id_variante_producto: variante.id_variante_producto,
+          nombre: nombre.toUpperCase(),
           descripcion: descModalidad,
-          cantidad_base = 1,
-          es_cantidad_variable = false,
-          minimo_cantidad = 0,
-          precio_costo = 0,
+          cantidad_base,
+          es_cantidad_variable,
+          minimo_cantidad,
+          precio_costo,
           precio_neto,
-          precio_factura
-        } = modalidad;
-        
-        if (nombre && precio_neto && precio_factura) {
-          await ModalidadProducto.create({
-            id_variante_producto: variante.id_variante_producto,
-            nombre: nombre.toUpperCase(),
-            descripcion: descModalidad,
-            cantidad_base,
-            es_cantidad_variable,
-            minimo_cantidad,
-            precio_costo,
-            precio_neto,
-            precio_neto_factura: precio_factura,
-            activa: true
-          }, { transaction });
-          totalModalidades++;
-        }
+          precio_neto_factura: precio_factura,
+          afecto_descuento_ticket,
+          activa: true
+        }, { transaction });
+        totalModalidades++;
       }
     }
 
@@ -864,8 +827,10 @@ router.put('/modalidad/:modalidadId', async (req, res, next) => {
     const { modalidadId } = req.params;
     const updateData = req.body;
 
+    console.log('📝 Datos recibidos para actualizar modalidad:', JSON.stringify(updateData, null, 2));
+
     const modalidad = await ModalidadProducto.findByPk(modalidadId);
-    
+
     if (!modalidad) {
       return res.status(404).json({
         success: false,
@@ -889,17 +854,21 @@ router.put('/modalidad/:modalidadId', async (req, res, next) => {
 
     // Campos permitidos para actualización
     const camposPermitidos = [
-      'nombre', 'descripcion', 'cantidad_base', 
-      'es_cantidad_variable', 'minimo_cantidad', 
-      'precio_costo', 'precio_neto', 'precio_neto_factura'
+      'nombre', 'descripcion', 'cantidad_base',
+      'es_cantidad_variable', 'minimo_cantidad',
+      'precio_costo', 'precio_neto', 'precio_neto_factura',
+      'afecto_descuento_ticket'
     ];
 
     const datosActualizacion: any = {};
     camposPermitidos.forEach(campo => {
+      console.log(`🔍 Verificando campo "${campo}": updateData["${campo}"] =`, updateData[campo]);
       if (updateData[campo] !== undefined) {
         datosActualizacion[campo] = updateData[campo];
       }
     });
+
+    console.log('✅ Campos que se van a actualizar:', datosActualizacion);
 
     if (Object.keys(datosActualizacion).length === 0) {
       return res.status(400).json({
@@ -909,7 +878,17 @@ router.put('/modalidad/:modalidadId', async (req, res, next) => {
     }
 
     datosActualizacion.fecha_actualizacion = new Date();
-    await modalidad.update(datosActualizacion);
+
+    console.log('🚀 Ejecutando UPDATE con:', datosActualizacion);
+
+    // Forzar la actualización incluso si el valor es el mismo
+    await modalidad.update(datosActualizacion, {
+      silent: false,
+      fields: Object.keys(datosActualizacion)
+    });
+    await modalidad.reload(); // Recargar desde BD para obtener valores actualizados
+
+    console.log('✅ Modalidad actualizada correctamente. afecto_descuento_ticket:', modalidad.afecto_descuento_ticket);
 
     res.json({
       success: true,
@@ -1389,5 +1368,444 @@ router.post('/:id/duplicar', async (req, res, next) => {
   }
 });
 
+
+// ===========================
+// 📤 EXPORTAR PRODUCTOS A EXCEL (Formato genérico por modalidades)
+// ===========================
+router.get('/exportar', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { categoria, tipo, template } = req.query;
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+
+    // Función para aplicar estilos a headers
+    const applyHeaderStyle = (sheet: any) => {
+      sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
+      sheet.getRow(1).alignment = { horizontal: 'center' };
+    };
+
+    // Si es template, generar archivo con 2 hojas vacías
+    if (template === 'true') {
+      // Hoja 1: Productos
+      const sheetProductos = workbook.addWorksheet('Productos');
+      sheetProductos.columns = [
+        { header: 'modelo', key: 'modelo', width: 30 },
+        { header: 'categoria', key: 'categoria', width: 15 },
+        { header: 'tipo', key: 'tipo', width: 15 },
+        { header: 'unidad_medida', key: 'unidad_medida', width: 15 }
+      ];
+      applyHeaderStyle(sheetProductos);
+
+      // Ejemplos para diferentes categorías
+      sheetProductos.addRow({ modelo: 'GABANNA', categoria: 'TELAS', tipo: 'LINO', unidad_medida: 'metro' });
+      sheetProductos.addRow({ modelo: 'CORCHETE GRANDE', categoria: 'CORCHETES', tipo: 'METALICO', unidad_medida: 'unidad' });
+      sheetProductos.addRow({ modelo: 'RELLENO PREMIUM', categoria: 'RELLENOS', tipo: 'GUATA', unidad_medida: 'kilogramo' });
+      sheetProductos.getRow(2).font = { italic: true, color: { argb: 'FF808080' } };
+      sheetProductos.getRow(3).font = { italic: true, color: { argb: 'FF808080' } };
+      sheetProductos.getRow(4).font = { italic: true, color: { argb: 'FF808080' } };
+
+      // Hoja 2: Variantes con Modalidades (formato genérico)
+      const sheetVariantes = workbook.addWorksheet('Variantes_Precios');
+      sheetVariantes.columns = [
+        { header: 'modelo', key: 'modelo', width: 25 },
+        { header: 'color', key: 'color', width: 15 },
+        { header: 'medida', key: 'medida', width: 12 },
+        { header: 'material', key: 'material', width: 18 },
+        { header: 'modalidad', key: 'modalidad', width: 12 },
+        { header: 'precio_neto', key: 'precio_neto', width: 12 },
+        { header: 'cantidad_base', key: 'cantidad_base', width: 14 },
+        { header: 'es_variable', key: 'es_variable', width: 12 },
+        { header: 'minimo_cant', key: 'minimo_cant', width: 12 }
+      ];
+      applyHeaderStyle(sheetVariantes);
+
+      // Ejemplos variados
+      // Tela con METRO y ROLLO
+      sheetVariantes.addRow({ modelo: 'GABANNA', color: 'AZUL', medida: '1.50', material: '100% Lino', modalidad: 'METRO', precio_neto: 8500, cantidad_base: 1, es_variable: 'SI', minimo_cant: 0.5 });
+      sheetVariantes.addRow({ modelo: 'GABANNA', color: 'AZUL', medida: '1.50', material: '100% Lino', modalidad: 'ROLLO', precio_neto: 170000, cantidad_base: 25, es_variable: 'NO', minimo_cant: 1 });
+      sheetVariantes.addRow({ modelo: 'GABANNA', color: 'ROJO', medida: '1.50', material: '100% Lino', modalidad: 'METRO', precio_neto: 8500, cantidad_base: 1, es_variable: 'SI', minimo_cant: 0.5 });
+      // Corchete con UNIDAD y CAJA
+      sheetVariantes.addRow({ modelo: 'CORCHETE GRANDE', color: '', medida: '15mm', material: 'Metal', modalidad: 'UNIDAD', precio_neto: 500, cantidad_base: 1, es_variable: 'NO', minimo_cant: 1 });
+      sheetVariantes.addRow({ modelo: 'CORCHETE GRANDE', color: '', medida: '15mm', material: 'Metal', modalidad: 'CAJA', precio_neto: 4500, cantidad_base: 10, es_variable: 'NO', minimo_cant: 1 });
+      // Relleno con KILO
+      sheetVariantes.addRow({ modelo: 'RELLENO PREMIUM', color: '', medida: '', material: 'Guata', modalidad: 'KILO', precio_neto: 12000, cantidad_base: 1, es_variable: 'SI', minimo_cant: 0.5 });
+
+      for (let i = 2; i <= 7; i++) {
+        sheetVariantes.getRow(i).font = { italic: true, color: { argb: 'FF808080' } };
+      }
+
+      // Hoja de instrucciones
+      const sheetInstrucciones = workbook.addWorksheet('Instrucciones');
+      sheetInstrucciones.columns = [{ header: 'Instrucciones de Uso', width: 85 }];
+      sheetInstrucciones.addRow(['']);
+      sheetInstrucciones.addRow(['📋 CÓMO USAR ESTE TEMPLATE']);
+      sheetInstrucciones.addRow(['']);
+      sheetInstrucciones.addRow(['1. HOJA "Productos": Ingrese los datos básicos del producto']);
+      sheetInstrucciones.addRow(['   - modelo: Nombre del producto (ej: GABANNA, CORCHETE GRANDE)']);
+      sheetInstrucciones.addRow(['   - categoria: TELAS, CORCHETES, PATAS, BOTONES, RELLENOS, etc.']);
+      sheetInstrucciones.addRow(['   - tipo: Subtipo del producto (ej: LINO, FELPA, METALICO)']);
+      sheetInstrucciones.addRow(['   - unidad_medida: metro, unidad, kilogramo, litros']);
+      sheetInstrucciones.addRow(['']);
+      sheetInstrucciones.addRow(['2. HOJA "Variantes_Precios": Una fila por cada MODALIDAD']);
+      sheetInstrucciones.addRow(['   - modelo: Debe coincidir EXACTAMENTE con la hoja Productos']);
+      sheetInstrucciones.addRow(['   - color: Color de la variante (puede estar vacío)']);
+      sheetInstrucciones.addRow(['   - medida: Ancho o medida del producto']);
+      sheetInstrucciones.addRow(['   - material: Composición del material']);
+      sheetInstrucciones.addRow(['   - modalidad: METRO, ROLLO, UNIDAD, CAJA, EMBALAJE, KILO, DOCENA, etc.']);
+      sheetInstrucciones.addRow(['   - precio_neto: Precio sin IVA']);
+      sheetInstrucciones.addRow(['   - cantidad_base: Cantidad que incluye (ej: 25 metros por rollo, 10 por caja)']);
+      sheetInstrucciones.addRow(['   - es_variable: SI si permite decimales (ej: 1.5 metros), NO si es cantidad fija']);
+      sheetInstrucciones.addRow(['   - minimo_cant: Cantidad mínima de venta (ej: 0.5 para medio metro)']);
+      sheetInstrucciones.addRow(['']);
+      sheetInstrucciones.addRow(['📌 EJEMPLOS:']);
+      sheetInstrucciones.addRow(['   - TELA: Crear filas con modalidad METRO y ROLLO']);
+      sheetInstrucciones.addRow(['   - CORCHETE: Crear filas con modalidad UNIDAD, CAJA y/o EMBALAJE']);
+      sheetInstrucciones.addRow(['   - RELLENO: Crear fila con modalidad KILO']);
+      sheetInstrucciones.addRow(['']);
+      sheetInstrucciones.addRow(['⚠️ NOTAS IMPORTANTES:']);
+      sheetInstrucciones.addRow(['   - El CÓDIGO del producto se genera automáticamente']);
+      sheetInstrucciones.addRow(['   - Las filas de ejemplo (grises) deben ser eliminadas']);
+      sheetInstrucciones.addRow(['   - Variantes con mismo modelo+color+medida+material se agrupan automáticamente']);
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename=template_productos.xlsx');
+      await workbook.xlsx.write(res);
+      return res.end();
+    }
+
+    // Exportación con datos existentes
+    const whereProducto: any = { activo: true };
+    if (categoria) whereProducto['$categoria.nombre$'] = categoria;
+    if (tipo) whereProducto.tipo = tipo;
+
+    const productos = await Producto.findAll({
+      where: whereProducto,
+      include: [
+        { model: Categoria, as: 'categoria', attributes: ['nombre'] },
+        {
+          model: VarianteProducto, as: 'variantes', where: { activo: true }, required: false,
+          include: [
+            { model: ModalidadProducto, as: 'modalidades', where: { activa: true }, required: false },
+            { model: StockPorBodega, as: 'stockPorBodega', required: false }
+          ]
+        }
+      ],
+      order: [['codigo', 'ASC']]
+    });
+
+    // Hoja 1: Productos
+    const sheetProductos = workbook.addWorksheet('Productos');
+    sheetProductos.columns = [
+      { header: 'codigo', key: 'codigo', width: 18 },
+      { header: 'modelo', key: 'modelo', width: 30 },
+      { header: 'categoria', key: 'categoria', width: 15 },
+      { header: 'tipo', key: 'tipo', width: 15 },
+      { header: 'unidad_medida', key: 'unidad_medida', width: 15 }
+    ];
+    applyHeaderStyle(sheetProductos);
+
+    // Hoja 2: Variantes con Modalidades (formato genérico)
+    const sheetVariantes = workbook.addWorksheet('Variantes_Precios');
+    sheetVariantes.columns = [
+      { header: 'codigo_producto', key: 'codigo_producto', width: 18 },
+      { header: 'modelo', key: 'modelo', width: 25 },
+      { header: 'color', key: 'color', width: 15 },
+      { header: 'medida', key: 'medida', width: 12 },
+      { header: 'material', key: 'material', width: 18 },
+      { header: 'modalidad', key: 'modalidad', width: 12 },
+      { header: 'precio_neto', key: 'precio_neto', width: 12 },
+      { header: 'cantidad_base', key: 'cantidad_base', width: 14 },
+      { header: 'es_variable', key: 'es_variable', width: 12 },
+      { header: 'minimo_cant', key: 'minimo_cant', width: 12 }
+    ];
+    applyHeaderStyle(sheetVariantes);
+
+    productos.forEach((producto: any) => {
+      // Agregar producto a Hoja 1
+      sheetProductos.addRow({
+        codigo: producto.codigo,
+        modelo: producto.nombre,
+        categoria: producto.categoria?.nombre,
+        tipo: producto.tipo,
+        unidad_medida: producto.unidad_medida
+      });
+
+      // Agregar una fila por cada modalidad de cada variante
+      producto.variantes?.forEach((variante: any) => {
+        variante.modalidades?.forEach((modalidad: any) => {
+          sheetVariantes.addRow({
+            codigo_producto: producto.codigo,
+            modelo: producto.nombre,
+            color: variante.color || '',
+            medida: variante.medida || '',
+            material: variante.material || '',
+            modalidad: modalidad.nombre,
+            precio_neto: modalidad.precio_neto,
+            cantidad_base: modalidad.cantidad_base,
+            es_variable: modalidad.es_cantidad_variable ? 'SI' : 'NO',
+            minimo_cant: modalidad.minimo_cantidad
+          });
+        });
+      });
+    });
+
+    const fecha = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=productos_${fecha}.xlsx`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ===========================
+// 📥 IMPORTAR PRODUCTOS (Formato genérico por modalidades)
+// ===========================
+router.post('/importar', async (req: Request, res: Response, next: NextFunction) => {
+  const multer = require('multer');
+  const upload = multer({ storage: multer.memoryStorage() });
+
+  upload.single('file')(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ success: false, message: 'Error al subir archivo' });
+
+    const transaction = await sequelize.transaction();
+    try {
+      if (!req.file) return res.status(400).json({ success: false, message: 'No se recibió archivo' });
+
+      const ExcelJS = require('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(req.file.buffer);
+
+      // Buscar hojas del formato
+      const sheetProductos = workbook.getWorksheet('Productos');
+      const sheetVariantes = workbook.getWorksheet('Variantes_Precios');
+
+      if (!sheetProductos || !sheetVariantes) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'El archivo debe tener las hojas "Productos" y "Variantes_Precios"'
+        });
+      }
+
+      // Función para obtener valor de celda (maneja diferentes tipos)
+      const getCellValue = (cell: any): string => {
+        if (!cell || cell.value === null || cell.value === undefined) return '';
+        if (typeof cell.value === 'object' && cell.value.text) return cell.value.text;
+        if (typeof cell.value === 'object' && cell.value.result) return String(cell.value.result);
+        return String(cell.value).trim();
+      };
+
+      const getCellNumber = (cell: any): number => {
+        if (!cell || cell.value === null || cell.value === undefined) return 0;
+        if (typeof cell.value === 'number') return cell.value;
+        if (typeof cell.value === 'object' && cell.value.result) return Number(cell.value.result) || 0;
+        return Number(cell.value) || 0;
+      };
+
+      // 1. Leer productos de Hoja 1
+      const productosMap = new Map();
+      let errores: string[] = [];
+
+      sheetProductos.eachRow({ includeEmpty: false }, (row: any, rowNumber: number) => {
+        if (rowNumber === 1) return; // Skip header
+
+        const modelo = getCellValue(row.getCell(1));
+        const categoria = getCellValue(row.getCell(2));
+        const tipo = getCellValue(row.getCell(3));
+        const unidad_medida = getCellValue(row.getCell(4)) || 'metro';
+
+        // Ignorar filas vacías o de ejemplo
+        if (!modelo || !categoria) return;
+
+        if (productosMap.has(modelo)) {
+          errores.push(`Línea ${rowNumber}: Producto "${modelo}" duplicado`);
+          return;
+        }
+
+        productosMap.set(modelo, {
+          modelo,
+          categoria,
+          tipo,
+          unidad_medida,
+          variantes: new Map() // Map de varianteKey -> { color, medida, material, modalidades: [] }
+        });
+      });
+
+      // 2. Leer variantes y modalidades de Hoja 2 (formato genérico)
+      // Columnas: modelo | color | medida | material | modalidad | precio_neto | cantidad_base | es_variable | minimo_cant
+      sheetVariantes.eachRow({ includeEmpty: false }, (row: any, rowNumber: number) => {
+        if (rowNumber === 1) return; // Skip header
+
+        const modelo = getCellValue(row.getCell(1));
+        const color = getCellValue(row.getCell(2));
+        const medida = getCellValue(row.getCell(3));
+        const material = getCellValue(row.getCell(4));
+        const modalidad = getCellValue(row.getCell(5)).toUpperCase();
+        const precio_neto = getCellNumber(row.getCell(6));
+        const cantidad_base = getCellNumber(row.getCell(7)) || 1;
+        const es_variable = getCellValue(row.getCell(8)).toUpperCase();
+        const minimo_cant = getCellNumber(row.getCell(9)) || 1;
+
+        // Ignorar filas vacías
+        if (!modelo || !modalidad) return;
+
+        // Verificar que el producto exista en Hoja 1
+        if (!productosMap.has(modelo)) {
+          errores.push(`Variantes línea ${rowNumber}: Producto "${modelo}" no existe en hoja Productos`);
+          return;
+        }
+
+        // Validar precio
+        if (precio_neto <= 0) {
+          errores.push(`Línea ${rowNumber}: precio_neto debe ser mayor a 0`);
+          return;
+        }
+
+        const producto = productosMap.get(modelo);
+        const varianteKey = `${color}|${medida}|${material}`;
+
+        // Crear variante si no existe
+        if (!producto.variantes.has(varianteKey)) {
+          producto.variantes.set(varianteKey, {
+            color: color || null,
+            medida: medida || null,
+            material: material || null,
+            modalidades: []
+          });
+        }
+
+        // Agregar modalidad a la variante
+        producto.variantes.get(varianteKey).modalidades.push({
+          nombre: modalidad,
+          precio_neto,
+          cantidad_base,
+          es_cantidad_variable: es_variable === 'SI',
+          minimo_cantidad: minimo_cant
+        });
+      });
+
+      // Validar que todos los productos tengan al menos una variante con modalidades
+      for (const [modelo, data] of productosMap) {
+        if (data.variantes.size === 0) {
+          errores.push(`Producto "${modelo}" no tiene variantes definidas en hoja Variantes_Precios`);
+        }
+      }
+
+      if (errores.length > 0) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Errores en el archivo',
+          errores: errores.slice(0, 15)
+        });
+      }
+
+      // 3. Crear productos en la base de datos
+      let importados = 0;
+      let variantesCreadas = 0;
+      let modalidadesCreadas = 0;
+
+      for (const [modelo, productoData] of productosMap) {
+        // Buscar o crear categoría
+        let categoriaObj = await Categoria.findOne({
+          where: { nombre: productoData.categoria },
+          transaction
+        });
+
+        if (!categoriaObj) {
+          categoriaObj = await Categoria.create({
+            nombre: productoData.categoria,
+            descripcion: `Categoría ${productoData.categoria}`,
+            activa: true
+          }, { transaction });
+        }
+
+        // Generar código automático
+        const prefijo = productoData.categoria.substring(0, 3).toUpperCase();
+        const tipoPrefix = productoData.tipo ? productoData.tipo.substring(0, 3).toUpperCase() : 'GEN';
+        const modeloPrefix = modelo.substring(0, 3).toUpperCase();
+        const timestamp = Date.now().toString().slice(-4);
+        let codigoFinal = `${prefijo}-${tipoPrefix}-${modeloPrefix}-${timestamp}`;
+
+        // Verificar código único
+        let contador = 1;
+        while (await Producto.findOne({ where: { codigo: codigoFinal }, transaction })) {
+          codigoFinal = `${prefijo}-${tipoPrefix}-${modeloPrefix}-${timestamp}-${contador}`;
+          contador++;
+        }
+
+        // Crear producto
+        const producto = await Producto.create({
+          codigo: codigoFinal,
+          nombre: modelo,
+          id_categoria: categoriaObj.id_categoria,
+          tipo: productoData.tipo || null,
+          unidad_medida: productoData.unidad_medida,
+          activo: true
+        }, { transaction });
+
+        importados++;
+
+        // Crear variantes con sus modalidades
+        for (const [, varianteData] of productoData.variantes) {
+          // Generar SKU único
+          let sku = `${codigoFinal}-${varianteData.color || 'STD'}`.substring(0, 50);
+          let skuContador = 1;
+
+          while (await VarianteProducto.findOne({ where: { sku }, transaction })) {
+            sku = `${codigoFinal}-${varianteData.color || 'STD'}-${skuContador}`.substring(0, 50);
+            skuContador++;
+          }
+
+          const variante = await VarianteProducto.create({
+            id_producto: producto.id_producto,
+            sku,
+            color: varianteData.color,
+            medida: varianteData.medida,
+            material: varianteData.material,
+            activo: true
+          }, { transaction });
+
+          variantesCreadas++;
+
+          // Crear todas las modalidades de esta variante
+          for (const modalidadData of varianteData.modalidades) {
+            await ModalidadProducto.create({
+              id_variante_producto: variante.id_variante_producto,
+              nombre: modalidadData.nombre,
+              descripcion: `Venta por ${modalidadData.nombre.toLowerCase()}`,
+              cantidad_base: modalidadData.cantidad_base,
+              es_cantidad_variable: modalidadData.es_cantidad_variable,
+              minimo_cantidad: modalidadData.minimo_cantidad,
+              precio_neto: modalidadData.precio_neto,
+              precio_neto_factura: Math.round(modalidadData.precio_neto * 1.19),
+              afecto_descuento_ticket: true,
+              activa: true
+            }, { transaction });
+
+            modalidadesCreadas++;
+          }
+        }
+      }
+
+      await transaction.commit();
+      res.status(201).json({
+        success: true,
+        data: {
+          productos_creados: importados,
+          variantes_creadas: variantesCreadas,
+          modalidades_creadas: modalidadesCreadas
+        },
+        message: `Importación exitosa: ${importados} productos, ${variantesCreadas} variantes y ${modalidadesCreadas} modalidades`
+      });
+    } catch (error) {
+      await transaction.rollback();
+      next(error);
+    }
+  });
+});
 
 export default router;

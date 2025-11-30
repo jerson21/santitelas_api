@@ -220,22 +220,25 @@ CREATE TABLE modalidades_producto (
     cantidad_base DECIMAL(10,2) NOT NULL,       -- 1, 4, 30
     es_cantidad_variable BOOLEAN DEFAULT FALSE, -- TRUE para metros/rollos variables
     minimo_cantidad DECIMAL(10,2) DEFAULT 0,    -- Para rollos mínimo 30m
-    
+
     -- Precios específicos por variante (en pesos chilenos CLP)
     precio_costo DECIMAL(10,0) DEFAULT 0,
     precio_neto DECIMAL(10,0) NOT NULL,
     precio_neto_factura DECIMAL(10,0) NOT NULL,
-    
+
     -- Precio final calculado (con IVA sobre precio_neto_factura)
     precio_con_iva DECIMAL(10,0) GENERATED ALWAYS AS (ROUND(precio_neto_factura * 1.19, 0)) STORED,
-    
+
+    -- Control de descuentos en ticket
+    afecto_descuento_ticket BOOLEAN DEFAULT TRUE,  -- Define si esta modalidad acepta descuentos en tickets
+
     activa BOOLEAN DEFAULT TRUE,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
+
     -- CAMBIO: Foreign key a variante específica
     FOREIGN KEY (id_variante_producto) REFERENCES variantes_producto(id_variante_producto) ON DELETE CASCADE,
-    
+
     -- Índices
     INDEX idx_variante_producto (id_variante_producto),
     INDEX idx_activa (activa),
@@ -295,22 +298,24 @@ CREATE TABLE clientes (
     id_cliente INT PRIMARY KEY AUTO_INCREMENT,
     rut VARCHAR(15) UNIQUE NOT NULL,
     tipo_cliente ENUM('persona', 'empresa') NOT NULL,
-    
+
     -- Datos básicos
     nombre VARCHAR(100),
     telefono VARCHAR(20),
     email VARCHAR(100),
-    
+
     -- Datos empresa (solo si tipo_cliente = 'empresa')
     razon_social VARCHAR(100),
     direccion TEXT,
-    
+    comuna VARCHAR(100),
+    giro VARCHAR(200),
+
     -- Control
     activo BOOLEAN DEFAULT TRUE,
     datos_completos BOOLEAN DEFAULT FALSE,
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
+
     INDEX idx_rut (rut),
     INDEX idx_tipo (tipo_cliente),
     INDEX idx_datos_completos (datos_completos),
@@ -500,7 +505,11 @@ CREATE TABLE ventas (
     rut_cliente VARCHAR(20),
     direccion_cliente TEXT,
     telefono_cliente VARCHAR(20),
-    
+    email_cliente VARCHAR(100),
+    razon_social VARCHAR(100),
+    comuna VARCHAR(100),
+    giro VARCHAR(200),
+
     estado ENUM('completada', 'anulada') DEFAULT 'completada',
     observaciones TEXT,
     
@@ -706,6 +715,7 @@ DELIMITER ;
 -- ==========================================================
 DELIMITER $$
 
+/*
 -- Trigger: Crear modalidades automáticamente al crear variante
 CREATE TRIGGER tr_crear_modalidades_variante
     AFTER INSERT ON variantes_producto
@@ -714,7 +724,7 @@ BEGIN
     IF (SELECT COUNT(*) FROM modalidades_producto WHERE id_variante_producto = NEW.id_variante_producto) = 0 THEN
         CALL crear_modalidades_para_variante(NEW.id_variante_producto);
     END IF;
-END$$
+END$$*/
 
 -- Trigger: Validar modalidad-variante y calcular subtotal
 CREATE TRIGGER tr_detalle_pedidos_validacion

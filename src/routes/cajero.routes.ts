@@ -216,11 +216,11 @@ router.post('/procesar-vale/:numeroVale', [
   param('numeroVale').isString().notEmpty().withMessage('Número de vale requerido'),
   body('tipo_documento').isIn(['ticket', 'boleta', 'factura']).withMessage('Tipo de documento debe ser ticket, boleta o factura'),
   body('metodo_pago').isString().notEmpty().withMessage('Método de pago requerido'),
-  body('nombre_cliente').optional().isString().trim(),
-  body('telefono_cliente').optional().isString().trim(),
-  body('email_cliente').optional().isEmail().withMessage('Email inválido'),
-  body('monto_pagado').optional().isNumeric().withMessage('Monto pagado debe ser numérico'),
-  body('descuento').optional().isNumeric().withMessage('Descuento debe ser numérico'),
+  body('nombre_cliente').optional({ nullable: true, checkFalsy: true }).isString().trim(),
+  body('telefono_cliente').optional({ nullable: true, checkFalsy: true }).isString().trim(),
+  body('email_cliente').optional({ nullable: true, checkFalsy: true }).isEmail().withMessage('Email inválido'),
+  body('monto_pagado').optional({ nullable: true, checkFalsy: true }).isNumeric().withMessage('Monto pagado debe ser numérico'),
+  body('descuento').optional({ nullable: true, checkFalsy: true }).isNumeric().withMessage('Descuento debe ser numérico'),
   handleValidationErrors
 ], async (req: Request, res: Response, next: NextFunction) => {
   const transaction = await sequelize.transaction();
@@ -233,6 +233,8 @@ router.post('/procesar-vale/:numeroVale', [
       direccion_cliente,
       razon_social,
       rut_cliente,
+      comuna,
+      giro,
       tipo_documento,
       metodo_pago,
       monto_pagado,
@@ -337,32 +339,96 @@ router.post('/procesar-vale/:numeroVale', [
       });
     }
 
-    // 5. Cliente, según documento
+    // 5. Cliente - Guardar/Actualizar siempre que haya datos completos
     let clienteId = vale.id_cliente;
-    if (tipo_documento === 'factura' && (!vale.cliente || !vale.cliente.datos_completos)) {
-      if (!rut_cliente || !razon_social) {
-        await transaction.rollback();
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Para factura se requiere RUT y razón social' 
+
+    // ✅ VALIDACIÓN OBLIGATORIA PARA FACTURA
+    if (tipo_documento === 'factura' && (!rut_cliente || !razon_social)) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Para factura se requiere RUT y razón social'
         });
-      }
+    }
+
+    // ✅ GUARDAR EN CLIENTE: Si hay RUT, guardar/actualizar independiente del tipo de documento
+    if (rut_cliente) {
+      console.log(`📝 Datos recibidos para guardar cliente:`, {
+        rut: rut_cliente,
+        razon_social,
+        nombre_cliente,
+        direccion_cliente,
+        comuna,
+        giro,
+        email_cliente,
+        telefono_cliente
+      });
+
       let cliente = await Cliente.findOne({ where: { rut: rut_cliente }, transaction });
+
       if (!cliente) {
+        // Crear nuevo cliente
+        // Determinar si es empresa o persona: si tiene giro, es empresa
+        const esEmpresa = !!(giro && giro.trim());
+
         cliente = await Cliente.create({
-          rut: rut_cliente, tipo_cliente: 'empresa', razon_social, nombre: nombre_cliente,
-          telefono: telefono_cliente, email: email_cliente, direccion: direccion_cliente, datos_completos: true
+          rut: rut_cliente,
+          tipo_cliente: esEmpresa ? 'empresa' : 'persona',
+          razon_social: esEmpresa ? (razon_social || null) : null,
+          nombre: nombre_cliente || razon_social || 'Cliente',
+          telefono: telefono_cliente || null,
+          email: email_cliente || null,
+          direccion: direccion_cliente || null,
+          comuna: comuna || null,
+          giro: esEmpresa ? giro : null,
+          datos_completos: !!(rut_cliente && (razon_social || nombre_cliente) && direccion_cliente)
         }, { transaction });
+        console.log(`✅ Cliente creado:`, {
+          rut: cliente.rut,
+          nombre: cliente.nombre,
+          razon_social: cliente.razon_social,
+          direccion: cliente.direccion,
+          comuna: cliente.comuna,
+          giro: cliente.giro
+        });
       } else {
+        // Actualizar cliente existente solo con los campos que vengan
+        const datosAnteriores = {
+          razon_social: cliente.razon_social,
+          nombre: cliente.nombre,
+          direccion: cliente.direccion,
+          comuna: cliente.comuna,
+          giro: cliente.giro
+        };
+
+        // Determinar si es empresa o persona: si tiene giro, es empresa
+        const esEmpresa = !!(giro && giro.trim());
+
         await cliente.update({
+          tipo_cliente: esEmpresa ? 'empresa' : 'persona',
           razon_social: razon_social || cliente.razon_social,
           nombre: nombre_cliente || cliente.nombre,
           telefono: telefono_cliente || cliente.telefono,
           email: email_cliente || cliente.email,
           direccion: direccion_cliente || cliente.direccion,
+          comuna: comuna || cliente.comuna,
+          giro: giro || cliente.giro,
           datos_completos: true
         }, { transaction });
+
+        console.log(`✅ Cliente actualizado:`, {
+          rut: cliente.rut,
+          datos_anteriores: datosAnteriores,
+          datos_nuevos: {
+            razon_social: cliente.razon_social,
+            nombre: cliente.nombre,
+            direccion: cliente.direccion,
+            comuna: cliente.comuna,
+            giro: cliente.giro
+          }
+        });
       }
+
       clienteId = cliente.id_cliente;
     }
 
@@ -426,8 +492,12 @@ const numeroVenta = await generarNumeroVenta(transaction, vale.fecha_creacion);
       total: totalFinal,
       nombre_cliente: nombre_cliente || vale.cliente?.nombre || 'Cliente',
       rut_cliente: rut_cliente || vale.cliente?.rut,
+      razon_social: razon_social || vale.cliente?.razon_social,
       direccion_cliente: direccion_cliente || vale.cliente?.direccion,
+      comuna: comuna || vale.cliente?.comuna,
+      giro: giro || vale.cliente?.giro,
       telefono_cliente: telefono_cliente || vale.cliente?.telefono,
+      email_cliente: email_cliente || vale.cliente?.email,
       estado: 'completada'
     }, { transaction });
 
@@ -537,12 +607,14 @@ router.get('/vale/:numeroVale/detalles', [
           as: 'cliente',
           attributes: [
             'id_cliente',
-            'rut', 
-            'nombre', 
-            'razon_social', 
-            'telefono', 
-            'email', 
-            'direccion', 
+            'rut',
+            'nombre',
+            'razon_social',
+            'telefono',
+            'email',
+            'direccion',
+            'comuna',
+            'giro',
             'tipo_cliente',
             'datos_completos'
           ],
@@ -566,7 +638,7 @@ router.get('/vale/:numeroVale/detalles', [
             {
               model: ModalidadProducto,
               as: 'modalidad',
-              attributes: ['nombre', 'descripcion', 'cantidad_base'],
+              attributes: ['nombre', 'descripcion', 'cantidad_base', 'afecto_descuento_ticket'],
               required: false
             }
           ]
@@ -617,17 +689,19 @@ router.get('/vale/:numeroVale/detalles', [
         telefono: vale.cliente.telefono,
         email: vale.cliente.email,
         direccion: vale.cliente.direccion,
+        comuna: vale.cliente.comuna,
+        giro: vale.cliente.giro,
         tipo_cliente: vale.cliente.tipo_cliente,
         datos_completos: vale.cliente.datos_completos,
         requiere_completar: !vale.cliente.datos_completos,
-        mensaje: vale.cliente.datos_completos 
-          ? '✅ Cliente con datos completos' 
+        mensaje: vale.cliente.datos_completos
+          ? '✅ Cliente con datos completos'
           : '⚠️ Faltan datos del cliente'
       } : {
         tiene_cliente: false,
         requiere_datos: vale.tipo_documento === 'factura',
-        mensaje: vale.tipo_documento === 'factura' 
-          ? '❌ Factura requiere datos del cliente' 
+        mensaje: vale.tipo_documento === 'factura'
+          ? '❌ Factura requiere datos del cliente'
           : 'ℹ️ Sin cliente asociado'
       },
       
@@ -652,7 +726,8 @@ router.get('/vale/:numeroVale/detalles', [
         modalidad: detalle.modalidad ? {
           nombre: detalle.modalidad.nombre,
           descripcion: detalle.modalidad.descripcion,
-          cantidad_base: detalle.modalidad.cantidad_base
+          cantidad_base: detalle.modalidad.cantidad_base,
+          afecto_descuento_ticket: detalle.modalidad.afecto_descuento_ticket
         } : null,
         cantidad: detalle.cantidad,
         unidad: detalle.varianteProducto?.producto?.unidad_medida,
@@ -668,6 +743,17 @@ router.get('/vale/:numeroVale/detalles', [
         descuento: vale.descuento,
         total: vale.total
       },
+
+      // ✅ INFORMACIÓN DE PAGO (si está completado)
+      ...(vale.estado === 'completado' ? {
+        metodo_pago: (vale as any).metodo_pago,
+        cuenta_transferencia: (vale as any).cuenta_transferencia,
+        monto_pagado: (vale as any).monto_pagado,
+        monto_cambio: (vale as any).monto_cambio,
+        fecha_cobro: (vale as any).fecha_cobro,
+        cajero_cobro: (vale as any).cajero_cobro
+      } : {}),
+
       notas_vendedor: vale.observaciones,
       tiempo_espera: Math.floor(
         (new Date().getTime() - new Date(vale.fecha_creacion).getTime()) / 60000
@@ -831,30 +917,393 @@ router.post('/vale/:numeroVale/confirmar-antiguo', async (req: Request, res: Res
   try {
     const { numeroVale } = req.params;
     const { confirmar } = req.body;
-    
+
     if (!confirmar) {
       return res.status(400).json({
         success: false,
         message: 'Confirmación requerida para procesar vale antiguo'
       });
     }
-    
+
     console.log(`✅ Usuario confirmó procesar vale antiguo: ${numeroVale}`);
-    
+
     // Redirigir a obtener detalles normalmente (forzando la búsqueda)
     // Aquí podrías implementar lógica específica si necesitas
-    
+
     res.json({
       success: true,
       message: 'Vale antiguo confirmado',
       redirect_to: `/cajero/vale/${numeroVale}/detalles`
     });
-    
+
   } catch (error) {
     console.error('❌ Error confirmando vale antiguo:', error);
     next(error);
   }
 });
+
+// ✅ ======================================================================
+// ✅ NUEVO ENDPOINT: Guardar/Actualizar cliente inmediatamente
+// ✅ ======================================================================
+router.post('/guardar-cliente', [
+  body('rut').isString().notEmpty().withMessage('RUT es obligatorio'),
+  body('razon_social').isString().notEmpty().withMessage('Razón social es obligatoria'),
+  body('direccion').isString().notEmpty().withMessage('Dirección es obligatoria'),
+  body('comuna').isString().notEmpty().withMessage('Comuna es obligatoria'),
+  body('giro').isString().notEmpty().withMessage('Giro es obligatorio'),
+  body('correo').optional().isEmail().withMessage('Email inválido'),
+  body('telefono').optional().isString().trim(),
+  handleValidationErrors
+], async (req: Request, res: Response, next: NextFunction) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const {
+      rut,
+      razon_social,
+      direccion,
+      comuna,
+      giro,
+      correo,
+      telefono
+    } = req.body;
+
+    console.log(`💾 [GUARDAR CLIENTE] Datos recibidos:`, {
+      rut,
+      razon_social,
+      direccion,
+      comuna,
+      giro,
+      correo,
+      telefono
+    });
+
+    // Buscar si el cliente ya existe
+    let cliente = await Cliente.findOne({ where: { rut }, transaction });
+
+    if (!cliente) {
+      // Crear nuevo cliente
+      // Determinar si es empresa o persona: si tiene giro, es empresa
+      const esEmpresa = !!(giro && giro.trim());
+
+      cliente = await Cliente.create({
+        rut,
+        tipo_cliente: esEmpresa ? 'empresa' : 'persona',
+        razon_social: esEmpresa ? razon_social : null,
+        nombre: razon_social, // Usamos razon_social como nombre (puede ser nombre personal o de empresa)
+        telefono: telefono || null,
+        email: correo || null,
+        direccion,
+        comuna,
+        giro: esEmpresa ? giro : null,
+        datos_completos: true
+      }, { transaction });
+
+      console.log(`✅ [GUARDAR CLIENTE] Cliente creado:`, {
+        id_cliente: cliente.id_cliente,
+        rut: cliente.rut,
+        razon_social: cliente.razon_social
+      });
+
+      await transaction.commit();
+
+      return res.json({
+        success: true,
+        message: 'Cliente creado exitosamente',
+        data: {
+          id_cliente: cliente.id_cliente,
+          rut: cliente.rut,
+          razon_social: cliente.razon_social,
+          direccion: cliente.direccion,
+          comuna: cliente.comuna,
+          giro: cliente.giro,
+          email: cliente.email,
+          telefono: cliente.telefono
+        }
+      });
+    } else {
+      // Actualizar cliente existente
+      // Determinar si es empresa o persona: si tiene giro, es empresa
+      const esEmpresa = !!(giro && giro.trim());
+
+      await cliente.update({
+        tipo_cliente: esEmpresa ? 'empresa' : 'persona',
+        razon_social: esEmpresa ? razon_social : null,
+        nombre: razon_social,
+        telefono: telefono || cliente.telefono,
+        email: correo || cliente.email,
+        direccion,
+        comuna,
+        giro: esEmpresa ? giro : null,
+        datos_completos: true
+      }, { transaction });
+
+      console.log(`✅ [GUARDAR CLIENTE] Cliente actualizado:`, {
+        id_cliente: cliente.id_cliente,
+        rut: cliente.rut,
+        razon_social: cliente.razon_social
+      });
+
+      await transaction.commit();
+
+      return res.json({
+        success: true,
+        message: 'Cliente actualizado exitosamente',
+        data: {
+          id_cliente: cliente.id_cliente,
+          rut: cliente.rut,
+          razon_social: cliente.razon_social,
+          direccion: cliente.direccion,
+          comuna: cliente.comuna,
+          giro: cliente.giro,
+          email: cliente.email,
+          telefono: cliente.telefono
+        }
+      });
+    }
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ [GUARDAR CLIENTE] Error:', error);
+    next(error);
+  }
+});
+
+
+/**
+ * @openapi
+ * /cajero/vale/{numeroVale}/actualizar-precios:
+ *   put:
+ *     summary: Actualizar precios de productos en un vale pendiente
+ *     parameters:
+ *       - in: path
+ *         name: numeroVale
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Número del vale (puede ser diario o completo)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - actualizaciones
+ *             properties:
+ *               actualizaciones:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - index
+ *                     - precio
+ *                   properties:
+ *                     index:
+ *                       type: integer
+ *                       description: Índice del producto en el array de detalles
+ *                     precio:
+ *                       type: number
+ *                       description: Nuevo precio unitario
+ *     responses:
+ *       200:
+ *         description: Precios actualizados exitosamente
+ *       400:
+ *         description: Error de validación
+ *       404:
+ *         description: Vale no encontrado
+ */
+router.put('/vale/:numeroVale/actualizar-precios', [
+  param('numeroVale').isString().notEmpty().withMessage('Número de vale requerido'),
+  body('actualizaciones').isArray().withMessage('Se requiere un array de actualizaciones'),
+  body('actualizaciones.*.index').isInt({ min: 0 }).withMessage('Índice debe ser un número entero no negativo'),
+  body('actualizaciones.*.precio').isNumeric().custom((value) => value > 0).withMessage('Precio debe ser mayor a 0'),
+  handleValidationErrors
+], async (req: Request, res: Response, next: NextFunction) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { numeroVale } = req.params;
+    const { actualizaciones } = req.body;
+    
+    // ✅ Obtener ID del cajero
+    const id_cajero = (req as any).user?.id;
+    
+    if (!id_cajero) {
+      await transaction.rollback();
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Usuario no autenticado' 
+      });
+    }
+    
+    console.log(`📝 Actualizando precios del vale: ${numeroVale}`);
+    console.log(`📋 Actualizaciones solicitadas:`, actualizaciones);
+    
+    // 1. Verificar turno abierto
+    const turnoActivo = await TurnoCaja.findOne({ 
+      where: { id_cajero, estado: 'abierto' }, 
+      transaction 
+    });
+    
+    if (!turnoActivo) {
+      await transaction.rollback();
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No tienes un turno de caja abierto' 
+      });
+    }
+    
+    // 2. Buscar el vale usando la función helper
+    const resultadoBusqueda = await buscarValePorNumero(numeroVale, transaction);
+    
+    if (!resultadoBusqueda.encontrado) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: resultadoBusqueda.mensaje || `Vale ${numeroVale} no encontrado`
+      });
+    }
+    
+    // 3. Obtener el vale completo con detalles
+    const vale = await Pedido.findOne({
+      where: { 
+        numero_pedido: resultadoBusqueda.numero_pedido,
+        estado: 'vale_pendiente' // Solo vales pendientes
+      },
+      include: [
+        {
+          model: DetallePedido,
+          as: 'detalles',
+          include: [
+            {
+              model: VarianteProducto,
+              as: 'varianteProducto',
+              include: [{
+                model: Producto,
+                as: 'producto'
+              }]
+            }
+          ]
+        }
+      ],
+      lock: transaction.LOCK.UPDATE,
+      transaction
+    });
+    
+    if (!vale) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: `Vale ${numeroVale} no encontrado o ya fue procesado`
+      });
+    }
+    
+    // 4. Validar índices
+    const detalles = vale.detalles || [];
+    for (const update of actualizaciones) {
+      if (update.index >= detalles.length) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Índice ${update.index} fuera de rango. El vale tiene ${detalles.length} productos`
+        });
+      }
+    }
+    
+    // 5. Aplicar actualizaciones
+    let cambiosRealizados = 0;
+    const cambiosLog: any[] = [];
+    const subtotalAnterior = vale.subtotal;
+    
+    for (const update of actualizaciones) {
+      const detalle = detalles[update.index];
+      const precioAnterior = detalle.precio_unitario;
+      
+      // Actualizar precio en el detalle
+      await detalle.update({
+        precio_unitario: update.precio,
+        subtotal: detalle.cantidad * update.precio
+      }, { transaction });
+      
+      cambiosRealizados++;
+      cambiosLog.push({
+        index: update.index,
+        producto: detalle.varianteProducto?.producto?.nombre || 'Producto',
+        descripcion: [
+          detalle.varianteProducto?.color,
+          detalle.varianteProducto?.medida
+        ].filter(Boolean).join(' - '),
+        cantidad: detalle.cantidad,
+        precio_anterior: precioAnterior,
+        precio_nuevo: update.precio,
+        diferencia_unitaria: update.precio - precioAnterior,
+        diferencia_total: (update.precio - precioAnterior) * detalle.cantidad
+      });
+    }
+    
+    // 6. Recalcular totales del pedido
+ // 6. Recalcular totales del pedido
+let nuevoSubtotal = 0;
+
+// Recorrer todos los detalles y usar el precio actualizado si corresponde
+for (let i = 0; i < detalles.length; i++) {
+  const actualizacion = actualizaciones.find((u: { index: number; precio: number }) => u.index === i);
+  if (actualizacion) {
+    // Usar el precio actualizado
+    nuevoSubtotal += detalles[i].cantidad * actualizacion.precio;
+  } else {
+    // Usar el precio original
+    nuevoSubtotal += Number(detalles[i].subtotal);
+  }
+}
+
+const nuevoTotal = nuevoSubtotal - (vale.descuento || 0);
+    
+    // 7. Actualizar pedido
+    await vale.update({
+      subtotal: nuevoSubtotal,
+      total: nuevoTotal,
+      fecha_actualizacion: new Date(),
+      observaciones: [
+        vale.observaciones,
+        `[PRECIOS ACTUALIZADOS POR CAJERO ID:${id_cajero} - ${new Date().toLocaleString('es-CL')}]`,
+        `[${cambiosRealizados} precios modificados - Diferencia total: $${(nuevoTotal - vale.total).toLocaleString('es-CL')}]`
+      ].filter(Boolean).join('\n')
+    }, { transaction });
+    
+    // 8. Commit de la transacción
+    await transaction.commit();
+    
+    console.log(`✅ Precios actualizados exitosamente:`, {
+      vale: numeroVale,
+      cambios: cambiosRealizados,
+      total_anterior: vale.total,
+      total_nuevo: nuevoTotal
+    });
+    
+    // 9. Respuesta exitosa
+    res.json({
+      success: true,
+      message: `Se actualizaron ${cambiosRealizados} precios correctamente`,
+      data: {
+        numero_vale: vale.numero_pedido,
+        cambios_realizados: cambiosRealizados,
+        total_anterior: vale.total,
+        total_nuevo: nuevoTotal,
+        diferencia_total: nuevoTotal - vale.total,
+        detalle_cambios: cambiosLog,
+        resumen: {
+          productos_actualizados: cambiosRealizados,
+          aumento_total: cambiosLog.reduce((sum, c) => sum + c.diferencia_total, 0)
+        }
+      }
+    });
+    
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Error actualizando precios:', error);
+    next(error);
+  }
+});
+
 
 // ✅ ======================================================================
 // ✅ ENDPOINT DEBUG: Ver todos los vales del día - CON TIPADO CORRECTO
@@ -1528,6 +1977,712 @@ router.get('/estado-turno', async (req: Request, res: Response, next: NextFuncti
     }
     
   } catch (error) {
+    next(error);
+  }
+});
+
+// ✅ ======================================================================
+// ✅ NUEVOS ENDPOINTS: REPORTES PARA CAJERO
+// ✅ ======================================================================
+
+/**
+ * @openapi
+ * /cajero/reportes/vales-cobrados:
+ *   get:
+ *     summary: Obtener historial de vales cobrados (completados) con filtros
+ *     parameters:
+ *       - in: query
+ *         name: fecha_inicio
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Fecha de inicio del rango (opcional, por defecto hoy)
+ *       - in: query
+ *         name: fecha_fin
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Fecha de fin del rango (opcional, por defecto hoy)
+ *       - in: query
+ *         name: limite
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Cantidad máxima de resultados
+ */
+router.get('/reportes/vales-cobrados', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const fechaInicioParam = req.query.fecha_inicio as string;
+    const fechaFinParam = req.query.fecha_fin as string;
+    const limiteParam = req.query.limite as string;
+
+    // Valores por defecto: día actual
+    const hoy = new Date().toISOString().split('T')[0];
+    const fechaInicio = fechaInicioParam || hoy;
+    const fechaFin = fechaFinParam || hoy;
+    const limite = limiteParam ? parseInt(limiteParam) : 50;
+
+    console.log(`📊 Obteniendo vales cobrados desde ${fechaInicio} hasta ${fechaFin}`);
+
+    // Buscar vales completados con sus ventas asociadas
+    const valesCobrados = await sequelize.query(`
+      SELECT
+        p.id_pedido,
+        p.numero_pedido,
+        p.numero_diario,
+        p.fecha_creacion,
+        p.fecha_actualizacion,
+        p.tipo_documento,
+        p.total as total_vale,
+        p.descuento,
+        p.observaciones,
+        v.numero_venta,
+        v.total as total_venta,
+        v.nombre_cliente,
+        v.rut_cliente,
+        v.razon_social,
+        c.nombre as cliente_nombre,
+        c.rut as cliente_rut,
+        c.tipo_cliente,
+        u.nombre_completo as vendedor_nombre,
+        u.usuario as vendedor_usuario,
+        tc.id_turno,
+        DATE(p.fecha_creacion) as fecha_cobro,
+        TIME(p.fecha_actualizacion) as hora_cobro,
+        DATEDIFF(p.fecha_actualizacion, p.fecha_creacion) as dias_para_cobrar
+      FROM pedidos p
+      INNER JOIN ventas v ON v.id_pedido = p.id_pedido
+      LEFT JOIN clientes c ON c.id_cliente = p.id_cliente
+      LEFT JOIN usuarios u ON u.id_usuario = p.id_vendedor
+      LEFT JOIN turnos_caja tc ON tc.id_turno = v.id_turno
+      WHERE p.estado = 'completado'
+        AND DATE(p.fecha_actualizacion) BETWEEN :fechaInicio AND :fechaFin
+      ORDER BY p.fecha_actualizacion DESC
+      LIMIT :limite
+    `, {
+      replacements: { fechaInicio, fechaFin, limite },
+      type: QueryTypes.SELECT
+    });
+
+    // Calcular estadísticas del reporte
+    const totalCobrado = valesCobrados.reduce((sum: number, vale: any) =>
+      sum + Number(vale.total_venta || 0), 0
+    );
+    const totalDescuentos = valesCobrados.reduce((sum: number, vale: any) =>
+      sum + Number(vale.descuento || 0), 0
+    );
+
+    // Agrupar por tipo de documento
+    const porTipoDocumento = valesCobrados.reduce((acc: any, vale: any) => {
+      const tipo = vale.tipo_documento || 'sin_especificar';
+      if (!acc[tipo]) {
+        acc[tipo] = { cantidad: 0, monto_total: 0 };
+      }
+      acc[tipo].cantidad++;
+      acc[tipo].monto_total += Number(vale.total_venta || 0);
+      return acc;
+    }, {});
+
+    // Agrupar por día
+    const porDia = valesCobrados.reduce((acc: any, vale: any) => {
+      const fecha = vale.fecha_cobro;
+      if (!acc[fecha]) {
+        acc[fecha] = { cantidad: 0, monto_total: 0, descuentos: 0 };
+      }
+      acc[fecha].cantidad++;
+      acc[fecha].monto_total += Number(vale.total_venta || 0);
+      acc[fecha].descuentos += Number(vale.descuento || 0);
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      data: {
+        vales: valesCobrados.map((vale: any) => ({
+          id_pedido: vale.id_pedido,
+          numero_pedido: vale.numero_pedido,
+          numero_diario: vale.numero_diario,
+          numero_display: vale.numero_diario
+            ? `#${String(vale.numero_diario).padStart(3, '0')}`
+            : vale.numero_pedido,
+          numero_venta: vale.numero_venta,
+          fecha_creacion: vale.fecha_creacion,
+          fecha_cobro: vale.fecha_actualizacion,
+          hora_cobro: vale.hora_cobro,
+          dias_para_cobrar: vale.dias_para_cobrar,
+          tipo_documento: vale.tipo_documento,
+          total_vale: Number(vale.total_vale),
+          descuento: Number(vale.descuento),
+          total_venta: Number(vale.total_venta),
+          cliente: {
+            nombre: vale.razon_social || vale.nombre_cliente || vale.cliente_nombre || 'Cliente sin datos',
+            rut: vale.rut_cliente || vale.cliente_rut,
+            tipo: vale.tipo_cliente
+          },
+          vendedor: {
+            nombre: vale.vendedor_nombre,
+            usuario: vale.vendedor_usuario
+          },
+          id_turno: vale.id_turno,
+          observaciones: vale.observaciones
+        })),
+        resumen: {
+          periodo: {
+            fecha_inicio: fechaInicio,
+            fecha_fin: fechaFin
+          },
+          totales: {
+            cantidad_vales: valesCobrados.length,
+            monto_total_cobrado: totalCobrado,
+            descuentos_aplicados: totalDescuentos,
+            monto_sin_descuentos: totalCobrado + totalDescuentos
+          },
+          por_tipo_documento: porTipoDocumento,
+          por_dia: porDia
+        }
+      },
+      message: `Se encontraron ${valesCobrados.length} vales cobrados`
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo vales cobrados:', error);
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /cajero/reportes/vales-por-cobrar:
+ *   get:
+ *     summary: Obtener vales pendientes de cobro con información del cliente
+ *     parameters:
+ *       - in: query
+ *         name: dias_atras
+ *         schema:
+ *           type: integer
+ *           default: 30
+ *         description: Cantidad de días hacia atrás para buscar vales pendientes
+ *       - in: query
+ *         name: solo_con_cliente
+ *         schema:
+ *           type: boolean
+ *           default: false
+ *         description: Filtrar solo vales que tienen cliente asociado
+ */
+router.get('/reportes/vales-por-cobrar', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const diasAtrasParam = req.query.dias_atras as string;
+    const soloConClienteParam = req.query.solo_con_cliente as string;
+
+    const diasAtras = diasAtrasParam ? parseInt(diasAtrasParam) : 30;
+    const soloConCliente = soloConClienteParam === 'true';
+
+    console.log(`📊 Obteniendo vales pendientes de cobro (últimos ${diasAtras} días)`);
+
+    // Construir query base
+    let query = `
+      SELECT
+        p.id_pedido,
+        p.numero_pedido,
+        p.numero_diario,
+        p.fecha_creacion,
+        p.fecha_actualizacion,
+        p.tipo_documento,
+        p.total,
+        p.descuento,
+        p.subtotal,
+        p.estado,
+        p.observaciones,
+        p.datos_completos,
+        c.id_cliente,
+        c.rut as cliente_rut,
+        c.nombre as cliente_nombre,
+        c.razon_social as cliente_razon_social,
+        c.telefono as cliente_telefono,
+        c.email as cliente_email,
+        c.direccion as cliente_direccion,
+        c.comuna as cliente_comuna,
+        c.tipo_cliente,
+        c.datos_completos as cliente_datos_completos,
+        u.nombre_completo as vendedor_nombre,
+        u.usuario as vendedor_usuario,
+        DATE(p.fecha_creacion) as fecha_vale,
+        TIME(p.fecha_creacion) as hora_vale,
+        DATEDIFF(CURDATE(), DATE(p.fecha_creacion)) as dias_pendiente
+      FROM pedidos p
+      LEFT JOIN clientes c ON c.id_cliente = p.id_cliente
+      LEFT JOIN usuarios u ON u.id_usuario = p.id_vendedor
+      WHERE p.estado IN ('vale_pendiente', 'procesando_caja')
+        AND p.fecha_creacion >= DATE_SUB(CURDATE(), INTERVAL :diasAtras DAY)
+    `;
+
+    if (soloConCliente) {
+      query += ` AND p.id_cliente IS NOT NULL`;
+    }
+
+    query += `
+      ORDER BY
+        CASE
+          WHEN p.id_cliente IS NOT NULL THEN 0
+          ELSE 1
+        END,
+        p.fecha_creacion ASC
+    `;
+
+    const valesPendientes = await sequelize.query(query, {
+      replacements: { diasAtras },
+      type: QueryTypes.SELECT
+    });
+
+    // Calcular estadísticas
+    const totalPendiente = valesPendientes.reduce((sum: number, vale: any) =>
+      sum + Number(vale.total || 0), 0
+    );
+
+    const conCliente = valesPendientes.filter((v: any) => v.id_cliente);
+    const sinCliente = valesPendientes.filter((v: any) => !v.id_cliente);
+
+    // Agrupar por cliente
+    const porCliente = valesPendientes
+      .filter((v: any) => v.id_cliente)
+      .reduce((acc: any, vale: any) => {
+        const rut = vale.cliente_rut || 'sin_rut';
+        if (!acc[rut]) {
+          acc[rut] = {
+            cliente: {
+              rut: vale.cliente_rut,
+              nombre: vale.cliente_razon_social || vale.cliente_nombre,
+              telefono: vale.cliente_telefono,
+              email: vale.cliente_email,
+              direccion: vale.cliente_direccion,
+              comuna: vale.cliente_comuna,
+              tipo: vale.tipo_cliente,
+              datos_completos: vale.cliente_datos_completos
+            },
+            vales: [],
+            cantidad_vales: 0,
+            monto_total: 0
+          };
+        }
+        acc[rut].vales.push({
+          numero_pedido: vale.numero_pedido,
+          numero_diario: vale.numero_diario,
+          fecha_creacion: vale.fecha_creacion,
+          dias_pendiente: vale.dias_pendiente,
+          total: Number(vale.total),
+          tipo_documento: vale.tipo_documento
+        });
+        acc[rut].cantidad_vales++;
+        acc[rut].monto_total += Number(vale.total);
+        return acc;
+      }, {});
+
+    // Convertir a array y ordenar por monto descendente
+    const clientesConDeuda = Object.values(porCliente)
+      .sort((a: any, b: any) => b.monto_total - a.monto_total);
+
+    // Agrupar por antigüedad
+    const porAntiguedad = {
+      hoy: valesPendientes.filter((v: any) => v.dias_pendiente === 0).length,
+      ayer: valesPendientes.filter((v: any) => v.dias_pendiente === 1).length,
+      ultimos_7_dias: valesPendientes.filter((v: any) => v.dias_pendiente >= 2 && v.dias_pendiente <= 7).length,
+      ultimos_30_dias: valesPendientes.filter((v: any) => v.dias_pendiente >= 8 && v.dias_pendiente <= 30).length,
+      mas_de_30_dias: valesPendientes.filter((v: any) => v.dias_pendiente > 30).length
+    };
+
+    res.json({
+      success: true,
+      data: {
+        vales: valesPendientes.map((vale: any) => ({
+          id_pedido: vale.id_pedido,
+          numero_pedido: vale.numero_pedido,
+          numero_diario: vale.numero_diario,
+          numero_display: vale.numero_diario
+            ? `#${String(vale.numero_diario).padStart(3, '0')}`
+            : vale.numero_pedido,
+          fecha_creacion: vale.fecha_creacion,
+          fecha_vale: vale.fecha_vale,
+          hora_vale: vale.hora_vale,
+          dias_pendiente: vale.dias_pendiente,
+          estado: vale.estado,
+          tipo_documento: vale.tipo_documento,
+          total: Number(vale.total),
+          descuento: Number(vale.descuento),
+          subtotal: Number(vale.subtotal),
+          datos_completos: vale.datos_completos,
+          cliente: vale.id_cliente ? {
+            id_cliente: vale.id_cliente,
+            rut: vale.cliente_rut,
+            nombre: vale.cliente_razon_social || vale.cliente_nombre || 'Sin nombre',
+            razon_social: vale.cliente_razon_social,
+            telefono: vale.cliente_telefono,
+            email: vale.cliente_email,
+            direccion: vale.cliente_direccion,
+            comuna: vale.cliente_comuna,
+            tipo: vale.tipo_cliente,
+            datos_completos: vale.cliente_datos_completos
+          } : null,
+          vendedor: {
+            nombre: vale.vendedor_nombre,
+            usuario: vale.vendedor_usuario
+          },
+          observaciones: vale.observaciones,
+          prioridad: vale.dias_pendiente > 7 ? 'alta' : vale.dias_pendiente > 3 ? 'media' : 'normal'
+        })),
+        resumen: {
+          periodo: {
+            dias_consultados: diasAtras,
+            filtro_aplicado: soloConCliente ? 'Solo vales con cliente' : 'Todos los vales'
+          },
+          totales: {
+            cantidad_total: valesPendientes.length,
+            monto_total_pendiente: totalPendiente,
+            con_cliente: conCliente.length,
+            sin_cliente: sinCliente.length,
+            monto_con_cliente: conCliente.reduce((sum: number, v: any) => sum + Number(v.total || 0), 0),
+            monto_sin_cliente: sinCliente.reduce((sum: number, v: any) => sum + Number(v.total || 0), 0)
+          },
+          por_antiguedad: porAntiguedad,
+          clientes_con_deuda: clientesConDeuda,
+          alertas: [
+            ...(porAntiguedad.mas_de_30_dias > 0 ? [{
+              tipo: 'error' as const,
+              mensaje: `Hay ${porAntiguedad.mas_de_30_dias} vales con más de 30 días pendientes`,
+              prioridad: 'alta' as const
+            }] : []),
+            ...(conCliente.length === 0 && valesPendientes.length > 0 ? [{
+              tipo: 'warning' as const,
+              mensaje: 'No hay vales con cliente asociado. Dificulta seguimiento de cobranza',
+              prioridad: 'media' as const
+            }] : [])
+          ]
+        }
+      },
+      message: `Se encontraron ${valesPendientes.length} vales pendientes de cobro`
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo vales por cobrar:', error);
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /cajero/reportes/resumen-del-dia:
+ *   get:
+ *     summary: Obtener resumen completo del día actual con todas las métricas
+ *     parameters:
+ *       - in: query
+ *         name: fecha
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Fecha del reporte (opcional, por defecto hoy)
+ */
+router.get('/reportes/resumen-del-dia', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const fechaParam = req.query.fecha as string;
+    const fecha = fechaParam || new Date().toISOString().split('T')[0];
+
+    console.log(`📊 Generando resumen del día: ${fecha}`);
+
+    // Obtener todos los vales del día
+    const valesDelDia = await sequelize.query(`
+      SELECT
+        p.id_pedido,
+        p.numero_pedido,
+        p.numero_diario,
+        p.estado,
+        p.tipo_documento,
+        p.total,
+        p.descuento,
+        p.fecha_creacion,
+        p.fecha_actualizacion,
+        v.numero_venta,
+        v.total as total_venta,
+        c.nombre as cliente_nombre,
+        c.rut as cliente_rut,
+        u.nombre_completo as vendedor_nombre,
+        TIME(p.fecha_creacion) as hora_creacion,
+        CASE
+          WHEN p.estado = 'completado' THEN TIME(p.fecha_actualizacion)
+          ELSE NULL
+        END as hora_cobro
+      FROM pedidos p
+      LEFT JOIN ventas v ON v.id_pedido = p.id_pedido
+      LEFT JOIN clientes c ON c.id_cliente = p.id_cliente
+      LEFT JOIN usuarios u ON u.id_usuario = p.id_vendedor
+      WHERE DATE(p.fecha_creacion) = :fecha
+      ORDER BY p.fecha_creacion ASC
+    `, {
+      replacements: { fecha },
+      type: QueryTypes.SELECT
+    });
+
+    // Clasificar vales
+    const completados = valesDelDia.filter((v: any) => v.estado === 'completado');
+    const pendientes = valesDelDia.filter((v: any) => v.estado === 'vale_pendiente');
+    const procesando = valesDelDia.filter((v: any) => v.estado === 'procesando_caja');
+    const cancelados = valesDelDia.filter((v: any) => v.estado === 'cancelado');
+
+    // Calcular totales
+    const totalRecaudado = completados.reduce((sum: number, v: any) =>
+      sum + Number(v.total_venta || 0), 0
+    );
+    const totalPendiente = pendientes.reduce((sum: number, v: any) =>
+      sum + Number(v.total || 0), 0
+    );
+    const totalDescuentos = completados.reduce((sum: number, v: any) =>
+      sum + Number(v.descuento || 0), 0
+    );
+
+    // Agrupar por hora
+    const porHora = valesDelDia.reduce((acc: any, vale: any) => {
+      const hora = vale.hora_creacion ? vale.hora_creacion.substring(0, 2) : '00';
+      if (!acc[hora]) {
+        acc[hora] = { cantidad: 0, completados: 0, pendientes: 0, monto: 0 };
+      }
+      acc[hora].cantidad++;
+      if (vale.estado === 'completado') {
+        acc[hora].completados++;
+        acc[hora].monto += Number(vale.total_venta || 0);
+      } else if (vale.estado === 'vale_pendiente') {
+        acc[hora].pendientes++;
+      }
+      return acc;
+    }, {});
+
+    // Agrupar por vendedor
+    const porVendedor = valesDelDia.reduce((acc: any, vale: any) => {
+      const vendedor = vale.vendedor_nombre || 'Sin asignar';
+      if (!acc[vendedor]) {
+        acc[vendedor] = {
+          cantidad: 0,
+          completados: 0,
+          pendientes: 0,
+          monto_total: 0,
+          monto_pendiente: 0
+        };
+      }
+      acc[vendedor].cantidad++;
+      if (vale.estado === 'completado') {
+        acc[vendedor].completados++;
+        acc[vendedor].monto_total += Number(vale.total_venta || 0);
+      } else if (vale.estado === 'vale_pendiente') {
+        acc[vendedor].pendientes++;
+        acc[vendedor].monto_pendiente += Number(vale.total || 0);
+      }
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      data: {
+        fecha: fecha,
+        resumen_general: {
+          total_vales: valesDelDia.length,
+          completados: completados.length,
+          pendientes: pendientes.length,
+          procesando: procesando.length,
+          cancelados: cancelados.length,
+          eficiencia: valesDelDia.length > 0
+            ? Math.round((completados.length / valesDelDia.length) * 100)
+            : 100
+        },
+        montos: {
+          total_recaudado: totalRecaudado,
+          total_pendiente: totalPendiente,
+          total_descuentos: totalDescuentos,
+          total_sin_descuentos: totalRecaudado + totalDescuentos,
+          promedio_por_vale: completados.length > 0
+            ? totalRecaudado / completados.length
+            : 0
+        },
+        por_hora: Object.entries(porHora).map(([hora, datos]: [string, any]) => ({
+          hora: `${hora}:00`,
+          ...datos
+        })).sort((a, b) => a.hora.localeCompare(b.hora)),
+        por_vendedor: Object.entries(porVendedor).map(([vendedor, datos]: [string, any]) => ({
+          vendedor,
+          ...datos
+        })).sort((a: any, b: any) => b.monto_total - a.monto_total),
+        vales_destacados: {
+          primer_vale: valesDelDia[0] ? {
+            numero: (valesDelDia[0] as any).numero_pedido,
+            hora: (valesDelDia[0] as any).hora_creacion,
+            vendedor: (valesDelDia[0] as any).vendedor_nombre
+          } : null,
+          ultimo_vale: valesDelDia[valesDelDia.length - 1] ? {
+            numero: (valesDelDia[valesDelDia.length - 1] as any).numero_pedido,
+            hora: (valesDelDia[valesDelDia.length - 1] as any).hora_creacion,
+            vendedor: (valesDelDia[valesDelDia.length - 1] as any).vendedor_nombre
+          } : null,
+          vale_mayor_monto: completados.length > 0
+            ? completados.reduce((max: any, v: any) =>
+                Number(v.total_venta) > Number(max.total_venta) ? v : max
+              )
+            : null
+        }
+      },
+      message: `Resumen del día ${fecha} generado exitosamente`
+    });
+
+  } catch (error) {
+    console.error('❌ Error generando resumen del día:', error);
+    next(error);
+  }
+});
+
+// ============================================================================
+// ENDPOINTS DE GESTIÓN DE CLIENTES
+// ============================================================================
+
+/**
+ * GET /cajero/clientes
+ * Obtener TODOS los clientes con sus totales y vales
+ */
+router.get('/clientes', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    console.log('📋 Obteniendo todos los clientes con sus vales...');
+
+    // Obtener todos los clientes
+    const clientes = await Cliente.findAll({
+      where: { activo: true },
+      order: [['nombre', 'ASC']]
+    });
+
+    // Para cada cliente, calcular sus totales
+    const clientesConTotales = await Promise.all(
+      clientes.map(async (cliente) => {
+        // Obtener todos los pedidos del cliente
+        const pedidos = await Pedido.findAll({
+          where: {
+            id_cliente: cliente.id_cliente,
+            estado: { [Op.in]: ['pendiente', 'completado'] }
+          },
+          attributes: ['id_pedido', 'numero_pedido', 'estado', 'total']
+        });
+
+        // Separar pendientes y pagados
+        const pendientes = pedidos.filter(p => p.estado === 'pendiente');
+        const pagados = pedidos.filter(p => p.estado === 'completado');
+
+        // Calcular totales (NETO)
+        const total_pendiente = pendientes.reduce((sum, p) => sum + Number(p.total), 0);
+        const total_pagado = pagados.reduce((sum, p) => sum + Number(p.total), 0);
+        const total_comprado = total_pendiente + total_pagado;
+
+        return {
+          nombre: cliente.getNombreCompleto(),
+          rut: cliente.rut,
+          telefono: cliente.telefono || '',
+          direccion: cliente.direccion || '',
+          comuna: cliente.comuna || '',
+          razon_social: cliente.razon_social || '',
+          email: cliente.email || '',
+          total_comprado: Math.round(total_comprado),
+          total_pendiente: Math.round(total_pendiente),
+          total_pagado: Math.round(total_pagado),
+          vales_pendientes: pendientes.length,
+          vales_pagados: pagados.length
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: clientesConTotales
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo clientes:', error);
+    next(error);
+  }
+});
+
+/**
+ * GET /cajero/clientes/:rut/vales
+ * Obtener vales de un cliente específico (pendientes y pagados)
+ */
+router.get('/clientes/:rut/vales', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    let { rut } = req.params;
+    console.log(`📋 Obteniendo vales del cliente con RUT original: ${rut}`);
+
+    // Normalizar el RUT: si viene sin guión, agregarlo
+    // Formato esperado: 12345678-9
+    if (!rut.includes('-') && rut.length >= 2) {
+      const rutSinDV = rut.slice(0, -1);
+      const dv = rut.slice(-1);
+      rut = `${rutSinDV}-${dv}`;
+      console.log(`🔄 RUT normalizado a: ${rut}`);
+    }
+
+    // Buscar cliente por RUT (con guión)
+    const cliente = await Cliente.findOne({
+      where: { rut: rut }
+    });
+
+    if (!cliente) {
+      console.log(`❌ Cliente con RUT ${rut} no encontrado`);
+      return res.status(404).json({
+        success: false,
+        message: 'Cliente no encontrado'
+      });
+    }
+
+    console.log(`✅ Cliente encontrado: ${cliente.getNombreCompleto()} (ID: ${cliente.id_cliente})`);
+
+    // Obtener todos los pedidos del cliente
+    console.log(`🔍 Buscando pedidos del cliente ID: ${cliente.id_cliente}`);
+    const pedidos = await Pedido.findAll({
+      where: {
+        id_cliente: cliente.id_cliente,
+        estado: { [Op.in]: ['pendiente', 'completado'] }
+      },
+      attributes: ['id_pedido', 'numero_pedido', 'estado', 'total', 'fecha_creacion'],
+      include: [
+        {
+          model: Venta,
+          as: 'venta',
+          required: false,
+          attributes: ['fecha_venta']
+        }
+      ],
+      order: [['fecha_creacion', 'DESC']]
+    });
+
+    console.log(`📊 Pedidos encontrados: ${pedidos.length}`);
+
+    // Separar pendientes y pagados
+    const pendientes = pedidos
+      .filter(p => p.estado === 'pendiente')
+      .map(p => ({
+        numero_pedido: p.numero_pedido,
+        fecha_creacion: p.fecha_creacion,
+        total: Math.round(Number(p.total))
+      }));
+
+    const pagados = pedidos
+      .filter(p => p.estado === 'completado')
+      .map(p => ({
+        numero_pedido: p.numero_pedido,
+        fecha_creacion: p.fecha_creacion,
+        fecha_pago: (p as any).venta?.fecha_venta || null,
+        total: Math.round(Number(p.total))
+      }));
+
+    res.json({
+      success: true,
+      data: {
+        pendientes,
+        pagados
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo vales del cliente:', error);
     next(error);
   }
 });

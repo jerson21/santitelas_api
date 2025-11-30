@@ -1,0 +1,49 @@
+# ====================================
+# DOCKER COMPOSE - PRODUCCIÓN
+# ====================================
+# Este archivo contiene configuraciones específicas para producción
+# Úsalo junto con docker-compose.yml:
+#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# ====================================
+
+version: '3.8'
+
+services:
+  api:
+    # Usar Dockerfile de producción (optimizado)
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Variables de entorno para producción
+    environment:
+      NODE_ENV: production
+
+      # NO activar seeding ni datos de desarrollo
+      SEED_DATABASE: "false"
+      FORCE_DEVELOPMENT_DATA: "false"
+
+      # Logs menos verbosos en producción
+      LOG_LEVEL: info
+
+    # En producción, NO montar código fuente como volumen
+    # Todo el código está compilado dentro de la imagen
+    volumes:
+      - ./logs/api:/app/logs        # Solo logs persistentes
+      # NO incluir ./src:/app/src (el código está en la imagen)
+
+    # Comando explícito para producción (opcional, ya está en Dockerfile)
+    command: npm start
+
+    # En producción, reiniciar siempre
+    restart: always
+
+    # Recursos limitados (opcional, descomentar si necesitas limitar)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 1G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 512M

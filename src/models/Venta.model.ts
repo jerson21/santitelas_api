@@ -105,6 +105,26 @@ export class Venta extends Model {
   telefono_cliente?: string;
 
   @Column({
+    type: DataType.STRING(100)
+  })
+  email_cliente?: string;
+
+  @Column({
+    type: DataType.STRING(100)
+  })
+  razon_social?: string;
+
+  @Column({
+    type: DataType.STRING(100)
+  })
+  comuna?: string;
+
+  @Column({
+    type: DataType.STRING(200)
+  })
+  giro?: string;
+
+  @Column({
     type: DataType.ENUM('completada', 'anulada'),
     defaultValue: 'completada'
   })

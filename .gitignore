@@ -1,7 +1,18 @@
 node_modules/
 dist/
 .env
+.env.*
 logs/
 *.log
 .DS_Store
 coverage/
+
+# Backups and sensitive data
+backup_*.sql
+*.sql.backup
+
+# Claude Code settings
+.claude/
+
+# Compressed files
+*.zip

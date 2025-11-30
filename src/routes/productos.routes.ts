@@ -237,7 +237,7 @@ router.get('/catalogo', async (req, res, next) => {
               attributes: [
                 'id_modalidad', 'nombre', 'descripcion', 'cantidad_base',
                 'es_cantidad_variable', 'minimo_cantidad', 'precio_costo',
-                'precio_neto', 'precio_neto_factura'
+                'precio_neto', 'precio_neto_factura', 'afecto_descuento_ticket'
               ]
             },
             {
@@ -297,6 +297,7 @@ router.get('/catalogo', async (req, res, next) => {
             cantidad_base: modalidad.cantidad_base,
             es_cantidad_variable: modalidad.es_cantidad_variable,
             minimo_cantidad: modalidad.minimo_cantidad,
+            afecto_descuento_ticket: modalidad.afecto_descuento_ticket,
             precios: {
               costo: modalidad.precio_costo,
               neto: modalidad.precio_neto,
