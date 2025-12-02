@@ -608,16 +608,27 @@ router.post('/clientes/importar', async (req, res, next) => {
                            clienteData.tipo_cliente?.toLowerCase() === 'empresa'
                            ? 'empresa' : 'persona';
 
+        // Extraer valores primero para calcular datos_completos
+        const nombre = clienteData.nombre || clienteData['Nombre/Razón social'] || null;
+        const razonSocial = clienteData.razon_social || clienteData['Nombre/Razón social'] || null;
+        const direccion = clienteData.direccion || clienteData['Dirección'] || null;
+        const giro = clienteData.giro || clienteData['Giro'] || null;
+
+        // Calcular si los datos están completos
+        const datosCompletos = tipoCliente === 'empresa'
+          ? !!(razonSocial && direccion && giro)
+          : !!nombre;
+
         // Mapear campos del Excel a campos del modelo
         const datosCliente = {
           rut: rutNormalizado,
           tipo_cliente: tipoCliente,
-          nombre: clienteData.nombre || clienteData['Nombre/Razón social'] || null,
+          nombre,
           nombre_fantasia: clienteData.nombre_fantasia || clienteData['Nombre fantasía'] || null,
           codigo_cliente: clienteData.codigo || clienteData.codigo_cliente || clienteData['Código'] || null,
-          razon_social: clienteData.razon_social || clienteData['Nombre/Razón social'] || null,
-          giro: clienteData.giro || clienteData['Giro'] || null,
-          direccion: clienteData.direccion || clienteData['Dirección'] || null,
+          razon_social: razonSocial,
+          giro,
+          direccion,
           ciudad: clienteData.ciudad || clienteData['Ciudad'] || null,
           comuna: clienteData.comuna || clienteData['Comuna'] || null,
           telefono: clienteData.telefono || clienteData['Teléfono'] || null,
@@ -638,9 +649,7 @@ router.post('/clientes/importar', async (req, res, next) => {
           dias_adicionales_morosidad: parseInt(clienteData.dias_adicionales_morosidad ||
                                                clienteData['Días adicionales de morosidad'] || 0) || 0,
           activo: clienteData.estado !== 'Inactivo' && clienteData['Estado'] !== 'Inactivo',
-          datos_completos: tipoCliente === 'empresa'
-            ? !!(datosCliente.razon_social && datosCliente.direccion && datosCliente.giro)
-            : !!datosCliente.nombre
+          datos_completos: datosCompletos
         };
 
         if (existente) {
