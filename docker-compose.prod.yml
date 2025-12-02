@@ -26,6 +26,9 @@ services:
       # Logs menos verbosos en producción
       LOG_LEVEL: info
 
+      # URLs del frontend permitidas (CORS)
+      FRONTEND_URL: https://telassanti.cl,https://www.telassanti.cl,http://localhost:3000
+
     # En producción, NO montar código fuente como volumen
     # Todo el código está compilado dentro de la imagen
     volumes:
