@@ -301,14 +301,38 @@ CREATE TABLE clientes (
 
     -- Datos básicos
     nombre VARCHAR(100),
+    nombre_fantasia VARCHAR(100),
+    codigo_cliente VARCHAR(20),
     telefono VARCHAR(20),
+    celular VARCHAR(20),
     email VARCHAR(100),
 
-    -- Datos empresa (solo si tipo_cliente = 'empresa')
+    -- Datos empresa/facturación
     razon_social VARCHAR(100),
     direccion TEXT,
+    ciudad VARCHAR(100),
     comuna VARCHAR(100),
     giro VARCHAR(200),
+
+    -- Contacto de pago
+    contacto_pago VARCHAR(100),
+    email_pago VARCHAR(100),
+    telefono_pago VARCHAR(20),
+
+    -- Contacto comercial
+    contacto_comercial VARCHAR(100),
+    email_comercial VARCHAR(200),
+
+    -- Configuración de crédito y descuentos
+    descuento_default DECIMAL(5,2) DEFAULT 0,
+    linea_credito DECIMAL(12,2) DEFAULT 0,
+    dias_credito INT DEFAULT 0,
+    forma_pago_default VARCHAR(50),
+    lista_precios VARCHAR(50),
+
+    -- Control de morosidad
+    restringir_si_vencido BOOLEAN DEFAULT FALSE,
+    dias_adicionales_morosidad INT DEFAULT 0,
 
     -- Control
     activo BOOLEAN DEFAULT TRUE,
@@ -319,7 +343,9 @@ CREATE TABLE clientes (
     INDEX idx_rut (rut),
     INDEX idx_tipo (tipo_cliente),
     INDEX idx_datos_completos (datos_completos),
-    INDEX idx_activo (activo)
+    INDEX idx_activo (activo),
+    INDEX idx_codigo_cliente (codigo_cliente),
+    INDEX idx_nombre_fantasia (nombre_fantasia)
 );
 
 -- ==========================================================

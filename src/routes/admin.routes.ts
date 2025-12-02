@@ -348,12 +348,28 @@ router.post('/clientes', async (req, res, next) => {
       rut,
       tipo_cliente,
       nombre,
+      nombre_fantasia,
+      codigo_cliente,
       telefono,
+      celular,
       email,
       razon_social,
       direccion,
+      ciudad,
       comuna,
       giro,
+      contacto_pago,
+      email_pago,
+      telefono_pago,
+      contacto_comercial,
+      email_comercial,
+      descuento_default,
+      linea_credito,
+      dias_credito,
+      forma_pago_default,
+      lista_precios,
+      restringir_si_vencido,
+      dias_adicionales_morosidad,
       datos_completos
     } = req.body;
 
@@ -374,17 +390,33 @@ router.post('/clientes', async (req, res, next) => {
       });
     }
 
-    // Crear cliente
+    // Crear cliente con todos los campos
     const nuevoCliente = await Cliente.create({
       rut,
       tipo_cliente: tipo_cliente || 'persona',
       nombre,
+      nombre_fantasia,
+      codigo_cliente,
       telefono,
+      celular,
       email,
       razon_social,
       direccion,
+      ciudad,
       comuna,
       giro,
+      contacto_pago,
+      email_pago,
+      telefono_pago,
+      contacto_comercial,
+      email_comercial,
+      descuento_default: descuento_default || 0,
+      linea_credito: linea_credito || 0,
+      dias_credito: dias_credito || 0,
+      forma_pago_default,
+      lista_precios,
+      restringir_si_vencido: restringir_si_vencido || false,
+      dias_adicionales_morosidad: dias_adicionales_morosidad || 0,
       datos_completos: datos_completos || false,
       activo: true
     });
@@ -414,12 +446,28 @@ router.put('/clientes/:id', async (req, res, next) => {
     const {
       tipo_cliente,
       nombre,
+      nombre_fantasia,
+      codigo_cliente,
       telefono,
+      celular,
       email,
       razon_social,
       direccion,
+      ciudad,
       comuna,
       giro,
+      contacto_pago,
+      email_pago,
+      telefono_pago,
+      contacto_comercial,
+      email_comercial,
+      descuento_default,
+      linea_credito,
+      dias_credito,
+      forma_pago_default,
+      lista_precios,
+      restringir_si_vencido,
+      dias_adicionales_morosidad,
       datos_completos
     } = req.body;
 
@@ -434,12 +482,28 @@ router.put('/clientes/:id', async (req, res, next) => {
     await cliente.update({
       tipo_cliente,
       nombre,
+      nombre_fantasia,
+      codigo_cliente,
       telefono,
+      celular,
       email,
       razon_social,
       direccion,
+      ciudad,
       comuna,
       giro,
+      contacto_pago,
+      email_pago,
+      telefono_pago,
+      contacto_comercial,
+      email_comercial,
+      descuento_default,
+      linea_credito,
+      dias_credito,
+      forma_pago_default,
+      lista_precios,
+      restringir_si_vencido,
+      dias_adicionales_morosidad,
       datos_completos,
       fecha_actualizacion: new Date()
     });
@@ -488,6 +552,157 @@ router.patch('/clientes/:id/activar', async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/clientes/importar:
+ *   post:
+ *     summary: Importar clientes masivamente desde JSON (convertido de Excel)
+ *     tags:
+ *       - admin
+ */
+router.post('/clientes/importar', async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { clientes: clientesData, modo = 'crear_actualizar' } = req.body;
+    // modo: 'solo_crear' | 'solo_actualizar' | 'crear_actualizar'
+
+    if (!Array.isArray(clientesData) || clientesData.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Se requiere un array de clientes'
+      });
+    }
+
+    console.log(`📥 [IMPORTAR] Procesando ${clientesData.length} clientes (modo: ${modo})`);
+
+    const resultados = {
+      creados: 0,
+      actualizados: 0,
+      errores: [] as { rut: string; error: string }[],
+      omitidos: 0
+    };
+
+    for (const clienteData of clientesData) {
+      try {
+        // Validar RUT
+        if (!clienteData.rut) {
+          resultados.errores.push({ rut: 'N/A', error: 'RUT es obligatorio' });
+          continue;
+        }
+
+        // Normalizar RUT (quitar puntos, mantener guión)
+        const rutNormalizado = clienteData.rut.toString().replace(/\./g, '').toUpperCase();
+
+        // Buscar si ya existe
+        const existente = await Cliente.findOne({
+          where: { rut: rutNormalizado },
+          transaction
+        });
+
+        // Determinar tipo de cliente
+        const tipoCliente = clienteData.tipo?.toLowerCase() === 'empresa' ||
+                           clienteData.tipo_cliente?.toLowerCase() === 'empresa'
+                           ? 'empresa' : 'persona';
+
+        // Mapear campos del Excel a campos del modelo
+        const datosCliente = {
+          rut: rutNormalizado,
+          tipo_cliente: tipoCliente,
+          nombre: clienteData.nombre || clienteData['Nombre/Razón social'] || null,
+          nombre_fantasia: clienteData.nombre_fantasia || clienteData['Nombre fantasía'] || null,
+          codigo_cliente: clienteData.codigo || clienteData.codigo_cliente || clienteData['Código'] || null,
+          razon_social: clienteData.razon_social || clienteData['Nombre/Razón social'] || null,
+          giro: clienteData.giro || clienteData['Giro'] || null,
+          direccion: clienteData.direccion || clienteData['Dirección'] || null,
+          ciudad: clienteData.ciudad || clienteData['Ciudad'] || null,
+          comuna: clienteData.comuna || clienteData['Comuna'] || null,
+          telefono: clienteData.telefono || clienteData['Teléfono'] || null,
+          celular: clienteData.celular || clienteData['Celular'] || null,
+          email: clienteData.email || clienteData['Correo electrónico'] || null,
+          contacto_pago: clienteData.contacto_pago || clienteData['Contacto pago'] || null,
+          email_pago: clienteData.email_pago || clienteData['Correo electrónico pago'] || null,
+          telefono_pago: clienteData.telefono_pago || clienteData['Teléfono pago'] || null,
+          contacto_comercial: clienteData.contacto_comercial || clienteData['Contacto comercial'] || null,
+          email_comercial: clienteData.email_comercial || clienteData['Correo(s) electrónico(s) comercial'] || null,
+          descuento_default: parseFloat(clienteData.descuento || clienteData['Descuento'] || 0) || 0,
+          linea_credito: parseFloat(clienteData.linea_credito || clienteData['Línea de crédito asignada'] || 0) || 0,
+          dias_credito: parseInt(clienteData.dias_credito || clienteData['Crédito'] || 0) || 0,
+          forma_pago_default: clienteData.forma_pago || clienteData['Forma de pago'] || null,
+          lista_precios: clienteData.lista_precios || clienteData['Lista de precios'] || null,
+          restringir_si_vencido: clienteData.restringir_si_vencido === true ||
+                                 clienteData['Restringir si existe un documento vencido'] === 'SI',
+          dias_adicionales_morosidad: parseInt(clienteData.dias_adicionales_morosidad ||
+                                               clienteData['Días adicionales de morosidad'] || 0) || 0,
+          activo: clienteData.estado !== 'Inactivo' && clienteData['Estado'] !== 'Inactivo',
+          datos_completos: tipoCliente === 'empresa'
+            ? !!(datosCliente.razon_social && datosCliente.direccion && datosCliente.giro)
+            : !!datosCliente.nombre
+        };
+
+        if (existente) {
+          // Cliente ya existe
+          if (modo === 'solo_crear') {
+            resultados.omitidos++;
+            continue;
+          }
+
+          // Actualizar cliente existente
+          await existente.update({
+            ...datosCliente,
+            rut: existente.rut, // No cambiar RUT
+            fecha_actualizacion: new Date()
+          }, { transaction });
+
+          resultados.actualizados++;
+        } else {
+          // Cliente nuevo
+          if (modo === 'solo_actualizar') {
+            resultados.omitidos++;
+            continue;
+          }
+
+          // Crear nuevo cliente
+          await Cliente.create(datosCliente, { transaction });
+          resultados.creados++;
+        }
+
+      } catch (error: any) {
+        resultados.errores.push({
+          rut: clienteData.rut || 'N/A',
+          error: error.message || 'Error desconocido'
+        });
+      }
+    }
+
+    await transaction.commit();
+
+    const totalProcesados = resultados.creados + resultados.actualizados;
+    console.log(`✅ [IMPORTAR] Completado: ${resultados.creados} creados, ${resultados.actualizados} actualizados, ${resultados.errores.length} errores`);
+
+    res.json({
+      success: true,
+      data: {
+        total_enviados: clientesData.length,
+        creados: resultados.creados,
+        actualizados: resultados.actualizados,
+        omitidos: resultados.omitidos,
+        errores: resultados.errores.length,
+        detalle_errores: resultados.errores.slice(0, 20) // Máximo 20 errores en respuesta
+      },
+      message: `Importación completada: ${totalProcesados} clientes procesados`
+    });
+
+  } catch (error: any) {
+    await transaction.rollback();
+    console.error('❌ Error en importación masiva:', error);
+    res.status(500).json({
+      success: false,
+      message: `Error en importación: ${error.message}`
+    });
   }
 });
 
