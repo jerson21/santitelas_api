@@ -1,13 +1,12 @@
 ﻿// ===========================
 // src/models/Bodega.model.ts
-import { 
-  Table, 
-  Column, 
-  Model, 
-  DataType, 
-  PrimaryKey, 
-  AutoIncrement, 
-  HasMany 
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  PrimaryKey,
+  AutoIncrement
 } from 'sequelize-typescript';
 import { StockPorBodega } from './StockPorBodega.model';
 import { Venta } from './Venta.model';
@@ -62,6 +61,7 @@ export class Bodega extends Model {
   })
   fecha_creacion!: Date;
 
+  // RELACIONES (definidas en index.ts setupAssociations)
   stock!: StockPorBodega[];
 
   ventas!: Venta[];

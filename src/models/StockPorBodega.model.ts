@@ -1,12 +1,11 @@
 ﻿// src/models/StockPorBodega.model.ts - VERSIÃ“N CORRECTA
-import { 
-  Table, 
-  Column, 
-  Model, 
-  DataType, 
-  PrimaryKey, 
-  AutoIncrement, 
-  BelongsTo, 
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  PrimaryKey,
+  AutoIncrement,
   ForeignKey
 } from 'sequelize-typescript';
 import { VarianteProducto } from './VarianteProducto.model';
@@ -69,7 +68,7 @@ export class StockPorBodega extends Model {
   })
   fecha_actualizacion!: Date;
 
-  // RELACIONES
+  // RELACIONES (definidas en index.ts setupAssociations)
   varianteProducto!: VarianteProducto;
 
   bodega!: Bodega;

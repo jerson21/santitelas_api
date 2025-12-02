@@ -1,14 +1,12 @@
 ﻿// src/models/VarianteProducto.model.ts - VERSIÓN CORREGIDA PARA NUEVA BD
-import { 
-  Table, 
-  Column, 
-  Model, 
-  DataType, 
-  PrimaryKey, 
-  AutoIncrement, 
-  BelongsTo, 
-  ForeignKey, 
-  HasMany
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  PrimaryKey,
+  AutoIncrement,
+  ForeignKey
 } from 'sequelize-typescript';
 import { Producto } from './Producto.model';
 import { StockPorBodega } from './StockPorBodega.model';
@@ -90,14 +88,14 @@ export class VarianteProducto extends Model {
   })
   fecha_actualizacion!: Date;
 
-  // ✅ RELACIONES CORREGIDAS
+  // ✅ RELACIONES (definidas en index.ts setupAssociations)
   producto!: Producto;
 
   stockPorBodega!: StockPorBodega[];
 
   movimientos!: MovimientoStock[];
 
-  // ✅ NUEVA RELACIÓN: Modalidades por variante específica
+  // Modalidades por variante específica
   modalidades!: ModalidadProducto[];
 
   // ✅ MÉTODOS CORREGIDOS

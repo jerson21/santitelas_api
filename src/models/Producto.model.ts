@@ -1,14 +1,12 @@
 ﻿// src/models/Producto.model.ts - VERSIÓN CORREGIDA PARA NUEVA BD
-import { 
-  Table, 
-  Column, 
-  Model, 
-  DataType, 
-  PrimaryKey, 
-  AutoIncrement, 
-  BelongsTo, 
-  ForeignKey, 
-  HasMany,
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  PrimaryKey,
+  AutoIncrement,
+  ForeignKey,
   Index
 } from 'sequelize-typescript';
 import { Categoria } from './Categoria.model';
@@ -109,7 +107,7 @@ export class Producto extends Model {
   })
   fecha_actualizacion!: Date;
 
-  // ✅ RELACIONES CORRECTAS
+  // ✅ RELACIONES (definidas en index.ts setupAssociations)
   categoria!: Categoria;
 
   variantes!: VarianteProducto[];

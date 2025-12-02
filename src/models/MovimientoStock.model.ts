@@ -1,12 +1,11 @@
 ﻿// src/models/MovimientoStock.model.ts - VERSIÃ“N CORREGIDA
-import { 
-  Table, 
-  Column, 
-  Model, 
-  DataType, 
-  PrimaryKey, 
-  AutoIncrement, 
-  BelongsTo,
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  PrimaryKey,
+  AutoIncrement,
   ForeignKey
 } from 'sequelize-typescript';
 import { VarianteProducto } from './VarianteProducto.model';  // âœ… CORREGIDO
@@ -92,7 +91,7 @@ export class MovimientoStock extends Model {
   })
   fecha_movimiento!: Date;
 
-  // âœ… RELACIONES CORREGIDAS
+  // ✅ RELACIONES (definidas en index.ts setupAssociations)
   varianteProducto!: VarianteProducto;
 
   bodega!: Bodega;
