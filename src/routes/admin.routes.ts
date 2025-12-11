@@ -68,14 +68,38 @@ router.get('/roles', async (req, res, next) => {
  * @openapi
  * /admin/usuarios:
  *   get:
- *     summary: Listar usuarios existentes (rol ADMIN)
+ *     summary: Listar usuarios existentes (rol ADMIN) con paginación
  *     tags:
  *       - admin
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Número de página
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: Cantidad de registros por página
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Buscar por nombre, email o teléfono
+ *       - in: query
+ *         name: activo
+ *         schema:
+ *           type: boolean
+ *         description: Filtrar por estado activo/inactivo
  *     responses:
  *       '200':
- *         description: Lista de usuarios
+ *         description: Lista de usuarios paginada
  *         content:
  *           application/json:
  *             schema:
@@ -89,7 +113,30 @@ router.get('/roles', async (req, res, next) => {
  */
 router.get('/usuarios', async (req, res, next) => {
   try {
-    const users = await Usuario.findAll({
+    // Parámetros de paginación y búsqueda
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+    const search = req.query.search ? String(req.query.search).trim() : '';
+    const activo = req.query.activo !== undefined ? req.query.activo === 'true' : undefined;
+
+    // Construir cláusula WHERE
+    const whereClause: any = {};
+
+    if (search) {
+      whereClause[Op.or] = [
+        { nombre_completo: { [Op.like]: `%${search}%` } },
+        { email: { [Op.like]: `%${search}%` } },
+        { telefono: { [Op.like]: `%${search}%` } }
+      ];
+    }
+
+    if (activo !== undefined) {
+      whereClause.activo = activo;
+    }
+
+    const { count, rows: users } = await Usuario.findAndCountAll({
+      where: whereClause,
       include: [
         {
           model: Rol,
@@ -99,7 +146,10 @@ router.get('/usuarios', async (req, res, next) => {
       ],
       attributes: {
         exclude: ['password_hash']
-      }
+      },
+      limit,
+      offset,
+      order: [['id_usuario', 'ASC']]
     });
 
     // Mapear los datos para incluir el rol como string
@@ -112,7 +162,16 @@ router.get('/usuarios', async (req, res, next) => {
       };
     });
 
-    res.json({ success: true, data: usersWithRole });
+    res.json({
+      success: true,
+      data: usersWithRole,
+      pagination: {
+        page,
+        limit,
+        total: count,
+        pages: Math.ceil(count / limit)
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -250,17 +309,77 @@ router.patch('/usuarios/:id/activar', async (req, res, next) => {
  * @openapi
  * /admin/clientes:
  *   get:
- *     summary: Listar todos los clientes con estadísticas
+ *     summary: Listar todos los clientes con estadísticas y paginación
  *     tags:
  *       - admin
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Número de página
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: Cantidad de registros por página
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Buscar por nombre, RUT, email, razón social o nombre fantasía
+ *       - in: query
+ *         name: activo
+ *         schema:
+ *           type: boolean
+ *         description: Filtrar por estado activo/inactivo
  */
 router.get('/clientes', async (req, res, next) => {
   try {
     console.log('📋 [ADMIN] Obteniendo lista de clientes...');
 
-    // Obtener clientes con conteo de pedidos
+    // Parámetros de paginación y búsqueda
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+    const search = req.query.search ? String(req.query.search).trim() : '';
+    const activo = req.query.activo !== undefined ? req.query.activo === 'true' : undefined;
+
+    // Construir cláusula WHERE para búsqueda
+    let whereClause = '';
+    const replacements: any = { limit, offset };
+
+    if (search) {
+      whereClause = `WHERE (c.nombre LIKE :searchStart OR c.rut LIKE :searchStart OR c.razon_social LIKE :searchStart OR c.nombre_fantasia LIKE :searchStart OR c.email LIKE :searchContains OR c.codigo_cliente LIKE :searchStart)`;
+      replacements.searchStart = `${search}%`;
+      replacements.searchContains = `%${search}%`;
+    }
+
+    if (activo !== undefined) {
+      whereClause = whereClause
+        ? `${whereClause} AND c.activo = :activo`
+        : `WHERE c.activo = :activo`;
+      replacements.activo = activo;
+    }
+
+    // Obtener total de registros
+    const countResult = await sequelize.query(`
+      SELECT COUNT(DISTINCT c.id_cliente) as total
+      FROM clientes c
+      ${whereClause}
+    `, {
+      replacements,
+      type: QueryTypes.SELECT
+    }) as any[];
+
+    const total = countResult[0]?.total || 0;
+
+    // Obtener clientes con conteo de pedidos (paginado)
     const clientes = await sequelize.query(`
       SELECT
         c.*,
@@ -269,16 +388,25 @@ router.get('/clientes', async (req, res, next) => {
         COALESCE(SUM(CASE WHEN p.estado = 'vale_pendiente' THEN p.total ELSE 0 END), 0) as monto_pendiente
       FROM clientes c
       LEFT JOIN pedidos p ON p.id_cliente = c.id_cliente
+      ${whereClause}
       GROUP BY c.id_cliente
-      ORDER BY c.fecha_creacion DESC
+      ORDER BY COALESCE(c.nombre_fantasia, c.razon_social, c.nombre) ASC
+      LIMIT :limit OFFSET :offset
     `, {
+      replacements,
       type: QueryTypes.SELECT
     });
 
     res.json({
       success: true,
       data: clientes,
-      message: `Se encontraron ${clientes.length} clientes`
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      },
+      message: `Se encontraron ${total} clientes`
     });
   } catch (error) {
     console.error('❌ Error obteniendo clientes:', error);

@@ -26,6 +26,32 @@ services:
       # Logs más verbosos en desarrollo
       LOG_LEVEL: debug
 
+      # URLs del frontend permitidas (CORS) - incluye producción para pruebas
+      FRONTEND_URL: https://telassanti.cl,https://www.telassanti.cl,http://localhost:3000,http://localhost:3001
+
+      # ===== PROVEEDOR DTE =====
+      # Opciones: relbase | libredte
+      DTE_PROVIDER: relbase
+
+      # Relbase API (Facturación Electrónica)
+      RELBASE_COMPANY_TOKEN: 19C9mRTfGV5ZdAee3ddGmyka
+      RELBASE_USER_TOKEN: gVSfBh9X2SXsVsaQsgdMMQpT
+      RELBASE_RUT_EMPRESA: 77611235-6
+      RELBASE_MODO_PRUEBA: "false"
+
+      # LibreDTE (alternativa a Relbase)
+      LIBREDTE_API_URL: http://libredte-app:80/api
+      LIBREDTE_API_KEY: ""
+      LIBREDTE_RUT_EMPRESA: 77611235-6
+      LIBREDTE_RAZON_SOCIAL: SANTI TELAS LIMITADA
+      LIBREDTE_GIRO: VENTA AL POR MENOR DE TEXTILES
+      LIBREDTE_ACTECO: "472301"
+      LIBREDTE_DIRECCION: Temuco 7990
+      LIBREDTE_COMUNA: La Florida
+      LIBREDTE_AMBIENTE: certificacion
+      # MODO PRUEBA: true = simula sin conectar a LibreDTE
+      LIBREDTE_MODO_PRUEBA: "true"
+
     # Volúmenes para hot reload
     volumes:
       - ./src:/app/src              # Código fuente - hot reload automático

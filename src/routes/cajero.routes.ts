@@ -12,6 +12,7 @@ import { Venta } from '../models/Venta.model';
 import { TipoDocumento } from '../models/TipoDocumento.model';
 import { TurnoCaja } from '../models/TurnoCaja.model';
 import { ArqueoCaja } from '../models/ArqueoCaja.model';
+import { RetiroCaja } from '../models/RetiroCaja.model';
 import { Pago } from '../models/Pago.model';
 import { Caja } from '../models/Caja.model';
 
@@ -1510,34 +1511,108 @@ router.post('/cerrar-turno', [
       });
     }
     
-    const resultados = await sequelize.query(
-      'SELECT calcular_dinero_teorico_turno(?) as dinero_teorico',
-      { replacements: [turnoActivo.id_turno], transaction }
-    ) as any[];
-    const dineroTeorico = resultados[0]?.[0]?.dinero_teorico || 0;
+    // Obtener datos del cajero
+    const cajero = await Usuario.findByPk(id_cajero, { transaction });
+
+    // Obtener retiros del turno
+    const retiros = await RetiroCaja.findAll({
+      where: { id_turno: turnoActivo.id_turno },
+      order: [['fecha_retiro', 'ASC']],
+      transaction
+    });
+    const totalRetiros = retiros.reduce((sum, r) => sum + Number(r.monto || 0), 0);
+
+    // Obtener ventas del turno con pagos
+    const ventas = await Venta.findAll({
+      where: { id_turno: turnoActivo.id_turno },
+      include: [{
+        model: Pago,
+        as: 'pagos',
+        include: [{
+          model: MetodoPago,
+          as: 'metodoPago'
+        }]
+      }],
+      transaction
+    });
+
+    // Calcular totales por método de pago
+    let totalEfectivo = 0;
+    let totalTransferencia = 0;
+    let totalTarjeta = 0;
+    let totalOtros = 0;
+
+    ventas.forEach(venta => {
+      const pagos = (venta as any).pagos || [];
+      pagos.forEach((pago: any) => {
+        const monto = Number(pago.monto || 0);
+        const metodoPago = pago.metodoPago?.nombre?.toLowerCase() || '';
+
+        if (pago.id_metodo_pago === 1 || metodoPago.includes('efectivo')) {
+          totalEfectivo += monto;
+        } else if (pago.id_metodo_pago === 2 || metodoPago.includes('transferencia')) {
+          totalTransferencia += monto;
+        } else if (pago.id_metodo_pago === 3 || metodoPago.includes('tarjeta') || metodoPago.includes('debito') || metodoPago.includes('credito')) {
+          totalTarjeta += monto;
+        } else {
+          totalOtros += monto;
+        }
+      });
+    });
+
+    // Calcular dinero teórico en caja (solo efectivo)
+    const dineroTeorico = Number(turnoActivo.monto_inicial || 0) + totalEfectivo - totalRetiros;
     const diferencia = monto_real_cierre - dineroTeorico;
-    
+
+    const fechaCierre = new Date();
+
     await turnoActivo.update({
-      fecha_cierre: new Date(),
+      fecha_cierre: fechaCierre,
       monto_real_cierre,
       monto_teorico_cierre: dineroTeorico,
       diferencia,
       estado: 'cerrado',
       observaciones_cierre
     }, { transaction });
-    
+
     await transaction.commit();
-    
+
     res.json({
       success: true,
       data: {
         id_turno: turnoActivo.id_turno,
+        cajero: cajero?.nombre_completo || 'Cajero',
+        caja: 'Caja Principal',
+
+        // Tiempos
+        fecha_apertura: turnoActivo.fecha_apertura,
+        fecha_cierre: fechaCierre,
+
+        // Montos de caja
+        monto_inicial: turnoActivo.monto_inicial,
         dinero_teorico: dineroTeorico,
         dinero_real: monto_real_cierre,
         diferencia,
         estado_diferencia: diferencia === 0 ? 'perfecto' : diferencia > 0 ? 'sobrante' : 'faltante',
-        total_ventas: turnoActivo.total_ventas,
-        cantidad_ventas: turnoActivo.cantidad_ventas
+
+        // Ventas
+        cantidad_ventas: ventas.length,
+        total_ventas: ventas.reduce((sum, v) => sum + Number(v.total || 0), 0),
+
+        // Desglose por método de pago
+        ventas_efectivo: totalEfectivo,
+        ventas_transferencia: totalTransferencia,
+        ventas_tarjeta: totalTarjeta,
+        ventas_otros: totalOtros,
+
+        // Retiros
+        cantidad_retiros: retiros.length,
+        total_retiros: totalRetiros,
+        retiros: retiros.map(r => ({
+          monto: r.monto,
+          motivo: r.motivo,
+          fecha: r.fecha_retiro
+        }))
       },
       message: '✅ Turno cerrado exitosamente'
     });
@@ -1952,7 +2027,36 @@ router.get('/estado-turno', async (req: Request, res: Response, next: NextFuncti
       const tiempoAbierto = Math.floor(
         (new Date().getTime() - new Date(turnoActivo.fecha_apertura).getTime()) / 60000
       );
-      
+
+      // Calcular ventas en efectivo del turno
+      const ventasEfectivo = await Venta.findAll({
+        where: { id_turno: turnoActivo.id_turno },
+        include: [{
+          model: Pago,
+          as: 'pagos',
+          where: { id_metodo_pago: 1 }, // 1 = Efectivo
+          required: true
+        }]
+      });
+
+      const totalVentasEfectivo = ventasEfectivo.reduce((sum, v) => {
+        const pagosEfectivo = (v as any).pagos || [];
+        return sum + pagosEfectivo.reduce((s: number, p: any) => s + Number(p.monto || 0), 0);
+      }, 0);
+
+      // Calcular total de retiros del turno
+      const retiros = await RetiroCaja.findAll({
+        where: { id_turno: turnoActivo.id_turno }
+      });
+      const totalRetiros = retiros.reduce((sum, r) => sum + Number(r.monto || 0), 0);
+
+      // Monto teórico actual = monto_inicial + ventas_efectivo - retiros
+      const montoTeorico = Number(turnoActivo.monto_inicial || 0) + totalVentasEfectivo - totalRetiros;
+
+      // Alerta si hay más de $200.000 en caja
+      const LIMITE_ALERTA_RETIRO = 200000;
+      const requiereRetiro = montoTeorico > LIMITE_ALERTA_RETIRO;
+
       res.json({
         success: true,
         data: {
@@ -1963,7 +2067,14 @@ router.get('/estado-turno', async (req: Request, res: Response, next: NextFuncti
           tiempo_abierto_minutos: tiempoAbierto,
           caja: (turnoActivo as any).caja?.nombre || 'Caja Principal',
           total_ventas: turnoActivo.total_ventas || 0,
-          cantidad_ventas: turnoActivo.cantidad_ventas || 0
+          cantidad_ventas: turnoActivo.cantidad_ventas || 0,
+          // Nuevos campos para control de caja
+          total_ventas_efectivo: totalVentasEfectivo,
+          total_retiros: totalRetiros,
+          cantidad_retiros: retiros.length,
+          monto_teorico: montoTeorico,
+          requiere_retiro: requiereRetiro,
+          limite_retiro: LIMITE_ALERTA_RETIRO
         }
       });
     } else {
@@ -1976,6 +2087,172 @@ router.get('/estado-turno', async (req: Request, res: Response, next: NextFuncti
       });
     }
     
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ✅ ======================================================================
+// ✅ ENDPOINTS: RETIROS DE CAJA
+// ✅ ======================================================================
+
+/**
+ * @openapi
+ * /cajero/retiro-caja:
+ *   post:
+ *     summary: Registrar un retiro de efectivo de la caja
+ */
+router.post('/retiro-caja', [
+  body('monto').isFloat({ min: 1 }).withMessage('El monto debe ser mayor a 0'),
+  body('motivo').optional().isString()
+], async (req: Request, res: Response, next: NextFunction) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(422).json({ success: false, errors: errors.array() });
+  }
+
+  const transaction = await sequelize.transaction();
+  try {
+    const { monto, motivo } = req.body;
+    const id_cajero = (req as any).user?.id;
+
+    if (!id_cajero) {
+      await transaction.rollback();
+      return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+    }
+
+    // Verificar turno abierto
+    const turnoActivo = await TurnoCaja.findOne({
+      where: { id_cajero, estado: 'abierto' },
+      transaction
+    });
+
+    if (!turnoActivo) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'No tienes un turno abierto para realizar retiros'
+      });
+    }
+
+    // Calcular monto actual en caja
+    const ventasEfectivo = await Venta.findAll({
+      where: { id_turno: turnoActivo.id_turno },
+      include: [{
+        model: Pago,
+        as: 'pagos',
+        where: { id_metodo_pago: 1 },
+        required: true
+      }],
+      transaction
+    });
+
+    const totalVentasEfectivo = ventasEfectivo.reduce((sum, v) => {
+      const pagosEfectivo = (v as any).pagos || [];
+      return sum + pagosEfectivo.reduce((s: number, p: any) => s + Number(p.monto || 0), 0);
+    }, 0);
+
+    const retirosAnteriores = await RetiroCaja.findAll({
+      where: { id_turno: turnoActivo.id_turno },
+      transaction
+    });
+    const totalRetirosAnteriores = retirosAnteriores.reduce((sum, r) => sum + Number(r.monto || 0), 0);
+
+    const montoCajaAntes = Number(turnoActivo.monto_inicial || 0) + totalVentasEfectivo - totalRetirosAnteriores;
+
+    // Validar que hay suficiente dinero
+    if (monto > montoCajaAntes) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `No hay suficiente dinero en caja. Disponible: $${montoCajaAntes.toLocaleString('es-CL')}`
+      });
+    }
+
+    const montoCajaDespues = montoCajaAntes - monto;
+
+    // Registrar el retiro
+    const retiro = await RetiroCaja.create({
+      id_turno: turnoActivo.id_turno,
+      monto: monto,
+      monto_caja_antes: montoCajaAntes,
+      monto_caja_despues: montoCajaDespues,
+      motivo: motivo || `Retiro de caja - ${new Date().toLocaleString('es-CL')}`
+    }, { transaction });
+
+    await transaction.commit();
+
+    res.json({
+      success: true,
+      data: {
+        id_retiro: retiro.id_retiro,
+        monto_retirado: monto,
+        monto_caja_antes: montoCajaAntes,
+        monto_caja_despues: montoCajaDespues,
+        fecha_retiro: retiro.fecha_retiro,
+        motivo: retiro.motivo
+      },
+      message: `Retiro de $${monto.toLocaleString('es-CL')} registrado correctamente. Nuevo saldo en caja: $${montoCajaDespues.toLocaleString('es-CL')}`
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+});
+
+/**
+ * @openapi
+ * /cajero/retiros:
+ *   get:
+ *     summary: Obtener historial de retiros del turno actual
+ */
+router.get('/retiros', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id_cajero = (req as any).user?.id;
+
+    if (!id_cajero) {
+      return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+    }
+
+    const turnoActivo = await TurnoCaja.findOne({
+      where: { id_cajero, estado: 'abierto' }
+    });
+
+    if (!turnoActivo) {
+      return res.json({
+        success: true,
+        data: {
+          retiros: [],
+          total_retiros: 0,
+          mensaje: 'No hay turno abierto'
+        }
+      });
+    }
+
+    const retiros = await RetiroCaja.findAll({
+      where: { id_turno: turnoActivo.id_turno },
+      order: [['fecha_retiro', 'DESC']]
+    });
+
+    const totalRetiros = retiros.reduce((sum, r) => sum + Number(r.monto || 0), 0);
+
+    res.json({
+      success: true,
+      data: {
+        retiros: retiros.map(r => ({
+          id_retiro: r.id_retiro,
+          monto: r.monto,
+          monto_caja_antes: r.monto_caja_antes,
+          monto_caja_despues: r.monto_caja_despues,
+          motivo: r.motivo,
+          fecha_retiro: r.fecha_retiro
+        })),
+        total_retiros: totalRetiros,
+        cantidad_retiros: retiros.length
+      }
+    });
+
   } catch (error) {
     next(error);
   }
@@ -2683,6 +2960,168 @@ router.get('/clientes/:rut/vales', async (req: Request, res: Response, next: Nex
 
   } catch (error) {
     console.error('❌ Error obteniendo vales del cliente:', error);
+    next(error);
+  }
+});
+
+// ===========================================
+// ENDPOINT: Actualizar venta con datos DTE
+// ===========================================
+// POST /cajero/ventas/:numero_venta/dte
+// Permite al frontend guardar los datos del DTE después de emitirlo en Relbase
+router.post('/ventas/:numero_venta/dte', auth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { numero_venta } = req.params;
+    const { folio_dte, tipo_dte, timbre_ted, pdf_url_dte, modo_prueba_dte } = req.body;
+
+    console.log(`📋 Actualizando DTE para venta ${numero_venta}:`, {
+      folio_dte,
+      tipo_dte,
+      modo_prueba_dte,
+      timbre_ted: timbre_ted ? `presente (${timbre_ted.length} chars)` : 'ausente'
+    });
+
+    // Buscar la venta por número
+    const venta = await Venta.findOne({
+      where: { numero_venta }
+    });
+
+    if (!venta) {
+      return res.status(404).json({
+        success: false,
+        message: `Venta ${numero_venta} no encontrada`
+      });
+    }
+
+    // Actualizar con datos del DTE
+    await venta.update({
+      folio_dte: folio_dte || null,
+      tipo_dte: tipo_dte || null,
+      timbre_ted: timbre_ted || null,
+      pdf_url_dte: pdf_url_dte || null,
+      modo_prueba_dte: modo_prueba_dte || false
+    });
+
+    console.log(`✅ Venta ${numero_venta} actualizada con DTE folio ${folio_dte}`);
+
+    res.json({
+      success: true,
+      message: `DTE guardado para venta ${numero_venta}`,
+      data: {
+        numero_venta,
+        folio_dte: venta.folio_dte,
+        tipo_dte: venta.tipo_dte,
+        modo_prueba_dte: venta.modo_prueba_dte
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error actualizando DTE de venta:', error);
+    next(error);
+  }
+});
+
+// ===========================================
+// ENDPOINT: Obtener datos para reimprimir boleta
+// ===========================================
+// GET /cajero/ventas/:numero_venta/reimprimir
+// Obtiene todos los datos necesarios para reimprimir una boleta
+router.get('/ventas/:numero_venta/reimprimir', auth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { numero_venta } = req.params;
+
+    const venta = await Venta.findOne({
+      where: { numero_venta },
+      include: [
+        {
+          model: Pedido,
+          as: 'pedido',
+          include: [
+            {
+              model: DetallePedido,
+              as: 'detalles',
+              include: [
+                {
+                  model: VarianteProducto,
+                  as: 'varianteProducto',
+                  include: [{ model: Producto, as: 'producto' }]
+                },
+                { model: ModalidadProducto, as: 'modalidad', required: false }
+              ]
+            },
+            { model: Usuario, as: 'vendedor', attributes: ['usuario', 'nombre_completo'] }
+          ]
+        },
+        {
+          model: Pago,
+          as: 'pagos',
+          include: [{ model: MetodoPago, as: 'metodoPago' }]
+        }
+      ]
+    });
+
+    if (!venta) {
+      return res.status(404).json({
+        success: false,
+        message: `Venta ${numero_venta} no encontrada`
+      });
+    }
+
+    // Obtener el método de pago principal (el de mayor monto o el primero)
+    const pagoPrincipal = venta.pagos?.length > 0
+      ? venta.pagos.reduce((max: any, p: any) => p.monto > max.monto ? p : max, venta.pagos[0])
+      : null;
+
+    const metodoPagoTexto: { [key: string]: string } = {
+      'EFE': 'Efectivo',
+      'TAR': 'Tarjeta',
+      'TRA': 'Transferencia'
+    };
+
+    res.json({
+      success: true,
+      data: {
+        numero_venta: venta.numero_venta,
+        numero_vale: venta.pedido?.numero_pedido,
+        numero_diario: venta.pedido?.numero_diario,
+        fecha: venta.fecha_venta,
+        cliente: {
+          nombre: venta.nombre_cliente,
+          rut: venta.rut_cliente,
+          direccion: venta.direccion_cliente
+        },
+        productos: venta.pedido?.detalles?.map((d: any) => ({
+          nombre: d.varianteProducto?.producto?.nombre || 'Producto',
+          descripcion_completa: `${d.varianteProducto?.producto?.tipo || ''} ${d.varianteProducto?.producto?.nombre || ''} ${d.varianteProducto?.color || ''} ${d.varianteProducto?.medida || ''}`.trim(),
+          cantidad: d.cantidad,
+          precio_unitario: d.precio_unitario,
+          subtotal: d.subtotal
+        })) || [],
+        totales: {
+          subtotal: venta.subtotal,
+          descuento: venta.descuento,
+          iva: venta.iva,
+          total: venta.total
+        },
+        pago: {
+          metodo: pagoPrincipal?.metodoPago?.codigo || 'EFE',
+          metodo_texto: metodoPagoTexto[pagoPrincipal?.metodoPago?.codigo] || pagoPrincipal?.metodoPago?.nombre || 'Efectivo',
+          monto_pagado: pagoPrincipal?.monto || venta.total,
+          vuelto: (pagoPrincipal?.monto || venta.total) - venta.total
+        },
+        vendedor: venta.pedido?.vendedor?.nombre_completo || venta.pedido?.vendedor?.usuario,
+        dte: {
+          folio: venta.folio_dte,
+          tipo: venta.tipo_dte,
+          timbre_ted: venta.timbre_ted,
+          pdf_url: venta.pdf_url_dte,
+          modo_prueba: venta.modo_prueba_dte
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo datos para reimprimir:', error);
     next(error);
   }
 });

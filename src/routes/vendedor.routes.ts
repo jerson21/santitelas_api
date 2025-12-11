@@ -634,10 +634,14 @@ router.get('/categorias', async (req, res, next) => {
 /// En vendedor.routes.ts - REEMPLAZO COMPLETO del endpoint pedido-rapido
 
 router.post('/pedido-rapido', async (req, res, next) => {
+  const tiempoInicio = Date.now();
+  const tiempos: Record<string, number> = {};
+
   // ✅ MODIFICADO: Ahora recibe datos del cliente
   const { tipo_documento, detalles, cliente } = req.body;
 
   try {
+    tiempos.inicio = 0;
     // ✅ 1) VALIDACIONES BÁSICAS FUERA DE LA TRANSACCIÓN
     if (!tipo_documento || !Array.isArray(detalles) || detalles.length === 0) {
       return res.status(400).json({
@@ -713,6 +717,8 @@ router.post('/pedido-rapido', async (req, res, next) => {
 
       subtotalTotal += det.cantidad * det.precio_unitario;
     }
+    tiempos.validaciones = Date.now() - tiempoInicio;
+    console.log(`⏱️ Validaciones completadas en ${tiempos.validaciones}ms (${detalles.length} productos)`);
 
     // ✅ 2) INICIAR TRANSACCIÓN PARA ESCRITURAS
     const transaction = await sequelize.transaction();
@@ -811,11 +817,16 @@ router.post('/pedido-rapido', async (req, res, next) => {
       }));
 
       await DetallePedido.bulkCreate(detallesParaInsertar, { transaction });
+      tiempos.detallesCreados = Date.now() - tiempoInicio;
 
       // ✅ 5) COMMIT
       await transaction.commit();
+      tiempos.commit = Date.now() - tiempoInicio;
 
       // ✅ 6) RESPUESTA CON DATOS PARA EL MODAL
+      tiempos.total = Date.now() - tiempoInicio;
+      console.log('⏱️ TIEMPOS PEDIDO-RAPIDO:', tiempos);
+
       return res.status(201).json({
         success: true,
         data: {
@@ -834,7 +845,9 @@ router.post('/pedido-rapido', async (req, res, next) => {
             nombre: cliente.nombre || 'Sin identificar',
             rut: cliente.rut || null,
             guardado: id_cliente !== null
-          } : null
+          } : null,
+          // DEBUG: Tiempos del servidor
+          _tiempos_ms: tiempos
         },
         message: `Vale #${nuevoPedido.numero_diario} creado exitosamente.`
       });
@@ -1753,7 +1766,7 @@ router.put('/pedidos/:id/productos', async (req, res, next) => {
 
     // Recalcular total del pedido
     const [resultado]: any = await sequelize.query(
-      `SELECT SUM(subtotal) as total FROM detalles_pedido WHERE id_pedido = ?`,
+      `SELECT SUM(subtotal) as total FROM detalle_pedidos WHERE id_pedido = ?`,
       {
         replacements: [id],
         type: QueryTypes.SELECT,

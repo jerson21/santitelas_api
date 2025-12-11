@@ -507,6 +507,21 @@ CREATE TABLE arqueos_caja (
     INDEX idx_fecha (fecha_arqueo)
 );
 
+-- Retiros de caja (sangría)
+CREATE TABLE retiros_caja (
+    id_retiro INT PRIMARY KEY AUTO_INCREMENT,
+    id_turno INT NOT NULL,
+    monto DECIMAL(10,2) NOT NULL,
+    monto_caja_antes DECIMAL(10,2) NOT NULL,
+    monto_caja_despues DECIMAL(10,2) NOT NULL,
+    motivo VARCHAR(255),
+    fecha_retiro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (id_turno) REFERENCES turnos_caja(id_turno) ON DELETE CASCADE,
+    INDEX idx_retiro_turno (id_turno),
+    INDEX idx_retiro_fecha (fecha_retiro)
+);
+
 -- ==========================================================
 -- 6. VENTAS FINALIZADAS
 -- ==========================================================
@@ -519,13 +534,13 @@ CREATE TABLE ventas (
     id_turno INT NOT NULL,
     id_tipo_documento INT NOT NULL,
     id_bodega INT NOT NULL,
-    
+
     -- Totales
     subtotal DECIMAL(10,2) NOT NULL,
     descuento DECIMAL(10,2) DEFAULT 0,
     iva DECIMAL(10,2) DEFAULT 0,
     total DECIMAL(10,2) NOT NULL,
-    
+
     -- Cliente
     nombre_cliente VARCHAR(100),
     rut_cliente VARCHAR(20),
@@ -536,9 +551,16 @@ CREATE TABLE ventas (
     comuna VARCHAR(100),
     giro VARCHAR(200),
 
+    -- DTE (Documento Tributario Electrónico) - Relbase
+    folio_dte INT NULL COMMENT 'Folio del DTE emitido en Relbase',
+    tipo_dte VARCHAR(20) NULL COMMENT 'Tipo: boleta, factura',
+    timbre_ted TEXT NULL COMMENT 'XML del Timbre Electrónico SII para código de barras PDF417',
+    pdf_url_dte VARCHAR(500) NULL COMMENT 'URL del PDF del DTE en Relbase',
+    modo_prueba_dte BOOLEAN DEFAULT FALSE COMMENT 'True si fue emitido en modo prueba',
+
     estado ENUM('completada', 'anulada') DEFAULT 'completada',
     observaciones TEXT,
-    
+
     fecha_venta TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
     FOREIGN KEY (id_pedido) REFERENCES pedidos(id_pedido),
@@ -551,7 +573,8 @@ CREATE TABLE ventas (
     INDEX idx_turno (id_turno),
     INDEX idx_tipo_documento (id_tipo_documento),
     INDEX idx_bodega (id_bodega),
-    INDEX idx_estado (estado)
+    INDEX idx_estado (estado),
+    INDEX idx_folio_dte (folio_dte)
 );
 
 -- Pagos de ventas

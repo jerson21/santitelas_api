@@ -751,6 +751,348 @@ router.get('/movimientos', async (req, res, next) => {
 });
 
 // =======================================================
+// POST /stock/entrada-masiva : Registrar múltiples entradas de stock
+// =======================================================
+router.post('/entrada-masiva', async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { id_bodega, motivo, referencia, entradas } = req.body;
+    const id_usuario = (req as any).user?.id;
+
+    // Validaciones básicas
+    if (!id_bodega || !motivo || !entradas || !Array.isArray(entradas) || entradas.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Faltan campos requeridos: id_bodega, motivo, entradas (array)'
+      });
+    }
+
+    // Validar que la bodega existe y está activa
+    const bodega = await Bodega.findByPk(id_bodega, { transaction });
+    if (!bodega || !bodega.activa) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Bodega no encontrada o inactiva'
+      });
+    }
+
+    // Validar cada entrada
+    for (let i = 0; i < entradas.length; i++) {
+      const entrada = entradas[i];
+      if (!entrada.id_variante_producto || !entrada.cantidad) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Entrada ${i + 1}: Faltan campos requeridos (id_variante_producto, cantidad)`
+        });
+      }
+      if (entrada.cantidad <= 0) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Entrada ${i + 1}: La cantidad debe ser mayor a 0`
+        });
+      }
+    }
+
+    // Obtener todos los IDs de variantes para validar existencia
+    const varianteIds = entradas.map(e => e.id_variante_producto);
+    const variantes = await VarianteProducto.findAll({
+      where: { id_variante_producto: varianteIds },
+      include: [{
+        model: Producto,
+        as: 'producto',
+        attributes: ['nombre', 'codigo']
+      }],
+      transaction
+    });
+
+    const variantesMap = new Map(variantes.map(v => [v.id_variante_producto, v]));
+
+    // Verificar que todas las variantes existan
+    for (const entrada of entradas) {
+      if (!variantesMap.has(entrada.id_variante_producto)) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: `Variante con ID ${entrada.id_variante_producto} no encontrada`
+        });
+      }
+    }
+
+    // Procesar todas las entradas
+    const resultados: any[] = [];
+    const movimientos: any[] = [];
+
+    for (const entrada of entradas) {
+      const { id_variante_producto, cantidad } = entrada;
+      const variante = variantesMap.get(id_variante_producto);
+
+      // Buscar o crear stock en bodega
+      let stockBodega = await StockPorBodega.findOne({
+        where: { id_variante_producto, id_bodega },
+        transaction
+      });
+
+      const stockAnterior = stockBodega?.cantidad_disponible || 0;
+      const stockNuevo = Number(stockAnterior) + Number(cantidad);
+
+      if (stockBodega) {
+        await stockBodega.update({
+          cantidad_disponible: stockNuevo,
+          fecha_actualizacion: new Date()
+        }, { transaction });
+      } else {
+        stockBodega = await StockPorBodega.create({
+          id_variante_producto,
+          id_bodega,
+          cantidad_disponible: cantidad,
+          cantidad_reservada: 0,
+          stock_minimo: 0,
+          stock_maximo: 0
+        }, { transaction });
+      }
+
+      // Crear movimiento
+      const movimiento = await MovimientoStock.create({
+        id_variante_producto,
+        id_bodega,
+        tipo_movimiento: 'entrada',
+        cantidad,
+        stock_anterior: stockAnterior,
+        stock_nuevo: stockNuevo,
+        motivo,
+        referencia: referencia || 'Ingreso masivo',
+        id_usuario
+      }, { transaction });
+
+      movimientos.push(movimiento);
+      resultados.push({
+        id_variante_producto,
+        sku: variante?.sku,
+        producto: variante?.producto?.nombre,
+        color: variante?.color,
+        cantidad_ingresada: cantidad,
+        stock_anterior: stockAnterior,
+        stock_nuevo: stockNuevo
+      });
+    }
+
+    await transaction.commit();
+
+    res.status(201).json({
+      success: true,
+      message: `Se registraron ${entradas.length} entradas de stock exitosamente`,
+      data: {
+        bodega: bodega.nombre,
+        motivo,
+        referencia,
+        total_entradas: entradas.length,
+        total_cantidad: entradas.reduce((sum, e) => sum + Number(e.cantidad), 0),
+        detalles: resultados
+      }
+    });
+  } catch (error) {
+    await transaction.rollback();
+    next(error);
+  }
+});
+
+// =======================================================
+// POST /stock/importar-excel : Importar stock desde Excel
+// =======================================================
+router.post('/importar-excel', async (req, res, next) => {
+  const multer = require('multer');
+  const ExcelJS = require('exceljs');
+  const upload = multer({ storage: multer.memoryStorage() });
+
+  upload.single('file')(req, res, async (err: any) => {
+    if (err) {
+      return res.status(400).json({ success: false, message: 'Error al subir archivo' });
+    }
+
+    const transaction = await sequelize.transaction();
+
+    try {
+      const file = (req as any).file;
+      if (!file) {
+        return res.status(400).json({ success: false, message: 'No se proporcionó archivo' });
+      }
+
+      const { id_bodega, motivo = 'Importación desde Excel' } = req.body;
+      const id_usuario = (req as any).user?.id;
+
+      if (!id_bodega) {
+        return res.status(400).json({ success: false, message: 'Se requiere id_bodega' });
+      }
+
+      // Validar bodega
+      const bodega = await Bodega.findByPk(id_bodega, { transaction });
+      if (!bodega || !bodega.activa) {
+        await transaction.rollback();
+        return res.status(404).json({ success: false, message: 'Bodega no encontrada o inactiva' });
+      }
+
+      // Leer archivo Excel
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(file.buffer);
+      const worksheet = workbook.worksheets[0];
+
+      if (!worksheet) {
+        await transaction.rollback();
+        return res.status(400).json({ success: false, message: 'El archivo Excel está vacío' });
+      }
+
+      // Buscar columnas por nombre (flexible)
+      const headerRow = worksheet.getRow(1);
+      let skuCol = -1, cantidadCol = -1;
+
+      headerRow.eachCell((cell: any, colNumber: number) => {
+        const value = String(cell.value || '').toLowerCase().trim();
+        if (value === 'sku' || value === 'codigo' || value === 'código') {
+          skuCol = colNumber;
+        } else if (value === 'cantidad' || value === 'metros' || value === 'mts' || value === 'qty') {
+          cantidadCol = colNumber;
+        }
+      });
+
+      if (skuCol === -1 || cantidadCol === -1) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'El archivo debe tener columnas "SKU" y "Cantidad" en la primera fila'
+        });
+      }
+
+      // Procesar filas
+      const resultados: any[] = [];
+      const erroresLinea: any[] = [];
+      let filasProcesadas = 0;
+
+      for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
+        const row = worksheet.getRow(rowNumber);
+        const sku = String(row.getCell(skuCol).value || '').trim();
+        const cantidadRaw = row.getCell(cantidadCol).value;
+        const cantidad = Number(cantidadRaw);
+
+        // Saltar filas vacías
+        if (!sku && !cantidadRaw) continue;
+
+        // Validar datos
+        if (!sku) {
+          erroresLinea.push({ fila: rowNumber, error: 'SKU vacío' });
+          continue;
+        }
+        if (isNaN(cantidad) || cantidad <= 0) {
+          erroresLinea.push({ fila: rowNumber, sku, error: 'Cantidad inválida' });
+          continue;
+        }
+
+        // Buscar variante por SKU
+        const variante = await VarianteProducto.findOne({
+          where: { sku },
+          include: [{
+            model: Producto,
+            as: 'producto',
+            attributes: ['nombre', 'codigo']
+          }],
+          transaction
+        });
+
+        if (!variante) {
+          erroresLinea.push({ fila: rowNumber, sku, error: 'SKU no encontrado' });
+          continue;
+        }
+
+        // Buscar o crear stock en bodega
+        let stockBodega = await StockPorBodega.findOne({
+          where: { id_variante_producto: variante.id_variante_producto, id_bodega },
+          transaction
+        });
+
+        const stockAnterior = stockBodega?.cantidad_disponible || 0;
+        const stockNuevo = Number(stockAnterior) + cantidad;
+
+        if (stockBodega) {
+          await stockBodega.update({
+            cantidad_disponible: stockNuevo,
+            fecha_actualizacion: new Date()
+          }, { transaction });
+        } else {
+          stockBodega = await StockPorBodega.create({
+            id_variante_producto: variante.id_variante_producto,
+            id_bodega,
+            cantidad_disponible: cantidad,
+            cantidad_reservada: 0,
+            stock_minimo: 0,
+            stock_maximo: 0
+          }, { transaction });
+        }
+
+        // Crear movimiento
+        await MovimientoStock.create({
+          id_variante_producto: variante.id_variante_producto,
+          id_bodega,
+          tipo_movimiento: 'entrada',
+          cantidad,
+          stock_anterior: stockAnterior,
+          stock_nuevo: stockNuevo,
+          motivo,
+          referencia: `Importación Excel - Fila ${rowNumber}`,
+          id_usuario
+        }, { transaction });
+
+        resultados.push({
+          fila: rowNumber,
+          sku,
+          producto: variante.producto?.nombre,
+          cantidad_ingresada: cantidad,
+          stock_anterior: stockAnterior,
+          stock_nuevo: stockNuevo
+        });
+
+        filasProcesadas++;
+      }
+
+      // Si hay errores pero también éxitos, continuar (parcial)
+      // Si todo falla, rollback
+      if (filasProcesadas === 0 && erroresLinea.length > 0) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'No se pudo procesar ninguna fila del archivo',
+          errores: erroresLinea
+        });
+      }
+
+      await transaction.commit();
+
+      res.status(201).json({
+        success: true,
+        message: `Se importaron ${filasProcesadas} registros de stock`,
+        data: {
+          bodega: bodega.nombre,
+          total_importados: filasProcesadas,
+          total_cantidad: resultados.reduce((sum, r) => sum + r.cantidad_ingresada, 0),
+          detalles: resultados,
+          errores: erroresLinea.length > 0 ? erroresLinea : undefined
+        }
+      });
+
+    } catch (error: any) {
+      await transaction.rollback();
+      console.error('Error importando stock desde Excel:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Error al importar archivo Excel'
+      });
+    }
+  });
+});
+
+// =======================================================
 // GET /stock/bajo-minimo : Productos bajo stock mínimo
 // =======================================================
 router.get('/bajo-minimo', async (req, res, next) => {

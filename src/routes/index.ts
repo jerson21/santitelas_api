@@ -15,7 +15,7 @@ import categoriasRoutes from './categorias.routes';
 import bodegasRoutes from './bodegas.routes';
 import stockRoutes from './stock.routes';
 import productosAdminRoutes from './productos-admin.routes';
-
+import dteRoutes from './dte.routes';
 
 import { authenticateToken } from '../middlewares/auth';
 
@@ -82,6 +82,9 @@ router.use('/stock', authenticateToken, stockRoutes);
 
 // Rutas de administración (para administradores)
 router.use('/productos-admin', authenticateToken,productosAdminRoutes);
+
+// Rutas de facturación electrónica (Relbase)
+router.use('/dte', authenticateToken, dteRoutes);
 
 
 

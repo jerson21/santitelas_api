@@ -688,59 +688,82 @@ router.get('/buscar/rapida', async (req, res, next) => {
       });
     }
 
-    // ✅ CONSULTA CORREGIDA: Búsqueda con like para MySQL
-    const productos = await Producto.findAll({
-      where: {
-        [Op.and]: [
-          { activo: true },
-          {
-            [Op.or]: [
-              { nombre: { [Op.like]: `%${q}%` } },      // ✅ Cambiado a like
-              { codigo: { [Op.like]: `%${q}%` } },      // ✅ Cambiado a like
-              { tipo: { [Op.like]: `%${q}%` } },        // ✅ Cambiado a like
-              { descripcion: { [Op.like]: `%${q}%` } }  // ✅ Cambiado a like
-            ]
-          }
+    // Dividir búsqueda en tokens para búsqueda multi-término
+    const searchTokens = q.trim().split(/\s+/).filter(t => t.length >= 2);
+
+    // Si hay múltiples términos, hacer búsqueda combinada
+    // Buscamos variantes donde TODOS los términos aparezcan en la combinación de:
+    // producto.nombre + producto.tipo + variante.color + variante.sku
+
+    // Construir condiciones para cada token
+    const buildTokenConditions = (tokens: string[]) => {
+      return tokens.map(token => ({
+        [Op.or]: [
+          { '$producto.nombre$': { [Op.like]: `%${token}%` } },
+          { '$producto.tipo$': { [Op.like]: `%${token}%` } },
+          { '$producto.codigo$': { [Op.like]: `%${token}%` } },
+          { color: { [Op.like]: `%${token}%` } },
+          { sku: { [Op.like]: `%${token}%` } }
         ]
+      }));
+    };
+
+    // Buscar variantes que coincidan con TODOS los tokens
+    const variantesCoincidentes = await VarianteProducto.findAll({
+      where: {
+        activo: true,
+        [Op.and]: buildTokenConditions(searchTokens)
       },
       include: [
         {
-          model: Categoria,
-          as: 'categoria',
-          attributes: ['nombre']
-        },
-        {
-          model: VarianteProducto,
-          as: 'variantes',
+          model: Producto,
+          as: 'producto',
           where: { activo: true },
-          required: false,
-          include: [
-            {
-              model: ModalidadProducto,
-              as: 'modalidades',
-              where: { activa: true },
-              required: false,
-              attributes: ['precio_neto'],
-              limit: 1,
-              order: [['precio_neto', 'ASC']]
-            },
-            {
-              model: StockPorBodega,
-              as: 'stockPorBodega'
-            }
-          ]
-        }
+          include: [{ model: Categoria, as: 'categoria', attributes: ['nombre'] }]
+        },
+        { model: ModalidadProducto, as: 'modalidades', where: { activa: true }, required: false, attributes: ['precio_neto'] },
+        { model: StockPorBodega, as: 'stockPorBodega' }
       ],
-      limit: Number(limit),
-      order: [['nombre', 'ASC']]
+      limit: Number(limit) * 3 // Traer más para tener suficientes productos
     });
 
-    const resultados = productos.map(producto => {
-      const productData = producto.toJSON();
-      
+    // Agrupar variantes por producto
+    const productosMap = new Map<number, any>();
+
+    variantesCoincidentes.forEach((v: any) => {
+      const varData = v.toJSON();
+      if (!varData.producto) return;
+
+      const prodId = varData.producto.id_producto;
+
+      if (!productosMap.has(prodId)) {
+        productosMap.set(prodId, {
+          ...varData.producto,
+          variantes: []
+        });
+      }
+
+      const prod = productosMap.get(prodId);
+      const varianteExiste = prod.variantes.some((vv: any) => vv.id_variante_producto === varData.id_variante_producto);
+
+      if (!varianteExiste) {
+        prod.variantes.push({
+          id_variante_producto: varData.id_variante_producto,
+          sku: varData.sku,
+          color: varData.color,
+          medida: varData.medida,
+          modalidades: varData.modalidades,
+          stockPorBodega: varData.stockPorBodega
+        });
+      }
+    });
+
+    const productos = Array.from(productosMap.values()).slice(0, Number(limit));
+
+    const resultados = productos.map((productData: any) => {
       // Encontrar el precio más bajo desde todas las modalidades de todas las variantes
       let precioMinimo = Infinity;
-      
+
       productData.variantes?.forEach((variante: any) => {
         variante.modalidades?.forEach((modalidad: any) => {
           if (modalidad.precio_neto < precioMinimo) {
@@ -749,14 +772,25 @@ router.get('/buscar/rapida', async (req, res, next) => {
         });
       });
 
+      // Mapear variantes con sus datos necesarios para ingreso de stock
+      const variantes = productData.variantes?.map((variante: any) => ({
+        id_variante_producto: variante.id_variante_producto,
+        sku: variante.sku,
+        color: variante.color,
+        medida: variante.medida,
+        stockTotal: variante.stockPorBodega?.reduce((sum: number, s: any) => sum + (s.cantidad_disponible || s.cantidad || 0), 0) || 0
+      })) || [];
+
       return {
         id_producto: productData.id_producto,
         categoria: productData.categoria?.nombre || 'SIN CATEGORÍA',
         tipo: productData.tipo || 'SIN TIPO',
         modelo: productData.nombre,
+        nombre: productData.nombre,
         codigo: productData.codigo,
         descripcion_completa: `${productData.categoria?.nombre || ''} ${productData.tipo || ''} ${productData.nombre}`.trim(),
-        precio_desde: precioMinimo === Infinity ? 0 : precioMinimo
+        precio_desde: precioMinimo === Infinity ? 0 : precioMinimo,
+        variantes: variantes
       };
     });
 

@@ -124,6 +124,42 @@ export class Venta extends Model {
   })
   giro?: string;
 
+  // Campos DTE (Documento Tributario Electrónico) - Relbase
+  @Column({
+    type: DataType.INTEGER,
+    allowNull: true,
+    field: 'folio_dte'
+  })
+  folio_dte?: number;
+
+  @Column({
+    type: DataType.STRING(20),
+    allowNull: true,
+    field: 'tipo_dte'
+  })
+  tipo_dte?: string;
+
+  @Column({
+    type: DataType.TEXT,
+    allowNull: true,
+    field: 'timbre_ted'
+  })
+  timbre_ted?: string;
+
+  @Column({
+    type: DataType.STRING(500),
+    allowNull: true,
+    field: 'pdf_url_dte'
+  })
+  pdf_url_dte?: string;
+
+  @Column({
+    type: DataType.BOOLEAN,
+    defaultValue: false,
+    field: 'modo_prueba_dte'
+  })
+  modo_prueba_dte?: boolean;
+
   @Column({
     type: DataType.ENUM('completada', 'anulada'),
     defaultValue: 'completada'

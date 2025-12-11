@@ -18,6 +18,7 @@ import { MetodoPago } from './MetodoPago.model';
 import { Caja } from './Caja.model';
 import { TurnoCaja } from './TurnoCaja.model';
 import { ArqueoCaja } from './ArqueoCaja.model';
+import { RetiroCaja } from './RetiroCaja.model';
 import { Venta } from './Venta.model';
 import { Pago } from './Pago.model';
 import { MovimientoStock } from './MovimientoStock.model';
@@ -26,7 +27,7 @@ import { MovimientoStock } from './MovimientoStock.model';
 export {
   Rol, Usuario, Categoria, Producto, VarianteProducto, ModalidadProducto,
   Cliente, TipoDocumento, Bodega, StockPorBodega, Pedido, DetallePedido,
-  MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock
+  MetodoPago, Caja, TurnoCaja, ArqueoCaja, RetiroCaja, Venta, Pago, MovimientoStock
 };
 
 export async function initializeModels() {
@@ -37,7 +38,7 @@ export async function initializeModels() {
     sequelize.addModels([
       Rol, Usuario, Categoria, Producto, VarianteProducto, ModalidadProducto,
       Cliente, TipoDocumento, Bodega, StockPorBodega, Pedido, DetallePedido,
-      MetodoPago, Caja, TurnoCaja, ArqueoCaja, Venta, Pago, MovimientoStock
+      MetodoPago, Caja, TurnoCaja, ArqueoCaja, RetiroCaja, Venta, Pago, MovimientoStock
     ]);
 
     // ✅ VERIFICAR que los modelos se registraron correctamente
@@ -74,10 +75,10 @@ export function setupAssociations() {
     // Verificar que todos los modelos existen antes de crear asociaciones
     const models = sequelize.models;
     const requiredModels = [
-      'Rol', 'Usuario', 'Categoria', 'Producto', 'VarianteProducto', 
-      'ModalidadProducto', 'Cliente', 'TipoDocumento', 'Bodega', 
-      'StockPorBodega', 'Pedido', 'DetallePedido', 'MetodoPago', 
-      'Caja', 'TurnoCaja', 'ArqueoCaja', 'Venta', 'Pago', 'MovimientoStock'
+      'Rol', 'Usuario', 'Categoria', 'Producto', 'VarianteProducto',
+      'ModalidadProducto', 'Cliente', 'TipoDocumento', 'Bodega',
+      'StockPorBodega', 'Pedido', 'DetallePedido', 'MetodoPago',
+      'Caja', 'TurnoCaja', 'ArqueoCaja', 'RetiroCaja', 'Venta', 'Pago', 'MovimientoStock'
     ];
 
     for (const modelName of requiredModels) {
@@ -142,6 +143,10 @@ export function setupAssociations() {
     // === ARQUEOS ===
     TurnoCaja.hasOne(ArqueoCaja, { foreignKey: 'id_turno', as: 'arqueo' });
     ArqueoCaja.belongsTo(TurnoCaja, { foreignKey: 'id_turno', as: 'turno' });
+
+    // === RETIROS DE CAJA ===
+    TurnoCaja.hasMany(RetiroCaja, { foreignKey: 'id_turno', as: 'retiros' });
+    RetiroCaja.belongsTo(TurnoCaja, { foreignKey: 'id_turno', as: 'turno' });
 
     // === VENTAS ===
     Pedido.hasOne(Venta, { foreignKey: 'id_pedido', as: 'venta' });
